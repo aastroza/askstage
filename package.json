@@ -1,0 +1,29 @@
+{
+  "name": "preguntaya",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787 --local",
+    "dev:vite": "vite --host 127.0.0.1 --port 5174",
+    "types": "wrangler types",
+    "build": "npm run types && tsc --noEmit && vite build",
+    "check": "npm run types && tsc --noEmit && wrangler deploy --dry-run",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "latest",
+    "@vitejs/plugin-react": "latest",
+    "qrcode": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/qrcode": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wrangler": "latest"
+  }
+}
