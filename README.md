@@ -1,4 +1,4 @@
-# PreguntaYa
+# AskStage
 
 A lightweight web app for live event Q&A, audience question voting, and shareable QR access.
 
