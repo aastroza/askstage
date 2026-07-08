@@ -4,4 +4,5 @@ dist
 .env
 .dev.vars
 *.local
+.impeccable/config.local.json
 worker-configuration.d.ts

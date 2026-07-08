@@ -21,7 +21,7 @@ export const copy = {
     anonymous: "Anonymous",
     defaultIntro: "Choose a talk, write your question, and vote for the ones you want answered live.",
     defaultFooter: "Create your own live Q&A",
-    publicFooterUrl: "askstage.app",
+    publicFooterUrl: "askstage.com",
   },
   es: {
     askQuestion: "Hacer una pregunta",
@@ -43,7 +43,7 @@ export const copy = {
     anonymous: "Anonima",
     defaultIntro: "Elige la charla, escribe tu pregunta y vota las que quieres escuchar en vivo.",
     defaultFooter: "Crea tu propio Q&A en vivo",
-    publicFooterUrl: "askstage.app",
+    publicFooterUrl: "askstage.com",
   },
 } satisfies Record<Language, Record<string, string>>;
 

@@ -122,17 +122,45 @@ function AuthScreen() {
 
   return (
     <PageShell className="auth-shell">
-      <section className="auth-panel">
-        <BrandMark />
-        <div className="auth-copy">
-          <h1>Live Q&A for any event</h1>
-          <p>Create an event page, share a QR code, and let the audience ask and vote from their phones.</p>
+      <section className="auth-landing" aria-labelledby="auth-title">
+        <div className="auth-story">
+          <BrandMark />
+          <div className="auth-copy">
+            <p className="auth-kicker">For rooms that want better questions</p>
+            <h1 id="auth-title">Live Q&A, ready before the room fills.</h1>
+            <p>Create an event, share the QR, and let every attendee ask from the phone already in their hand.</p>
+          </div>
+          <div className="auth-actions">
+            {error ? <Notice tone="error">{error}</Notice> : null}
+            <button className="primary-button google-button" type="button" disabled={loading} onClick={loginWithGoogle}>
+              <span className="google-mark" aria-hidden="true">G</span>
+              {loading ? "Redirecting..." : "Continue with Google"}
+            </button>
+            <p>Organizer sign-in only. Attendees never need an account.</p>
+          </div>
         </div>
-        {error ? <Notice tone="error">{error}</Notice> : null}
-        <button className="primary-button google-button" type="button" disabled={loading} onClick={loginWithGoogle}>
-          <span className="google-mark" aria-hidden="true">G</span>
-          {loading ? "Redirecting..." : "Continue with Google"}
-        </button>
+
+        <figure className="auth-visual">
+          <img
+            src="https://images.unsplash.com/photo-1505373877841-8d25f7d46678?auto=format&fit=crop&w=1600&q=80"
+            alt="An audience gathered for a conference session in a bright event room."
+          />
+          <figcaption>
+            <span aria-hidden="true" />
+            Questions are already coming in.
+          </figcaption>
+          <div className="auth-phone-preview" aria-hidden="true">
+            <div className="phone-topline">
+              <span>Live now</span>
+              <strong>8 questions</strong>
+            </div>
+            <p>How do we keep the energy after the first question?</p>
+            <div className="phone-vote-row">
+              <span>24 votes</span>
+              <span>Next up</span>
+            </div>
+          </div>
+        </figure>
       </section>
     </PageShell>
   );
@@ -598,7 +626,7 @@ function EventEditor({
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       {activeTab === "questions" ? (
-        <section className="editor-main-card live-questions">
+        <section className="live-questions">
           <div className="section-head compact">
             <div>
               <h2>Live questions</h2>
@@ -908,7 +936,8 @@ function PublicEventPage({ slug }: { slug: string }) {
   const intro = event.introText || strings.defaultIntro;
   const askLabel = event.askButtonLabel || strings.askQuestion;
   const footerLabel = event.footerLabel || strings.defaultFooter;
-  const footerUrl = event.footerUrl || "https://askstage.app";
+  const footerUrl = event.footerUrl || "https://askstage.com";
+  const eventMeta = [event.dateLabel, event.locationLabel].filter(Boolean).join(" / ");
 
   return (
     <main className="public-shell" style={accentStyle}>
@@ -916,7 +945,7 @@ function PublicEventPage({ slug }: { slug: string }) {
         <BrandMark compact />
         <div className="event-meta">
           <strong>{event.title}</strong>
-          <span>{[event.dateLabel, event.locationLabel].filter(Boolean).join(" / ")}</span>
+          <span>{eventMeta}</span>
         </div>
         <button className="theme-button" type="button" aria-label="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           <Icon name={theme === "dark" ? "sun" : "moon"} />
