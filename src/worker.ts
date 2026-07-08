@@ -245,10 +245,14 @@ async function createOwnerEvent(request: Request, sql: Sql, userId: string): Pro
   const body = await readJson(request);
   const title = cleanText(typeof body.title === "string" ? body.title : "Untitled event").slice(0, 140) || "Untitled event";
   const slug = await uniqueSlug(sql, slugFromTitle(title));
+  const language = body.language === "es" ? "es" : "en";
+  const dateLabel = cleanText(String(body.dateLabel ?? "")).slice(0, 80);
+  const locationLabel = cleanText(String(body.locationLabel ?? "")).slice(0, 80);
+  const talks = parseCreateTalks(body.talks, language);
 
   const rows = await sql`
-    insert into events (owner_id, slug, title, intro_text, ask_button_label, footer_label, footer_url)
-    values (${userId}, ${slug}, ${title}, '', '', '', '')
+    insert into events (owner_id, slug, title, date_label, location_label, language, intro_text, ask_button_label, footer_label, footer_url)
+    values (${userId}, ${slug}, ${title}, ${dateLabel}, ${locationLabel}, ${language}, '', '', '', '')
     returning
       id::text,
       slug,
@@ -261,10 +265,12 @@ async function createOwnerEvent(request: Request, sql: Sql, userId: string): Pro
       updated_at as "updatedAt"
   `;
 
-  await sql`
-    insert into event_talks (event_id, title, speakers, role, position)
-    values (${rows[0].id}, 'Main session', '', '', 0)
-  `;
+  for (const [index, talk] of talks.entries()) {
+    await sql`
+      insert into event_talks (event_id, title, speakers, role, position)
+      values (${rows[0].id}, ${talk.title}, ${talk.speakers}, ${talk.role}, ${index})
+    `;
+  }
 
   return json({ event: rows[0] }, 201);
 }
@@ -627,6 +633,27 @@ function parseEventPayload(body: Record<string, unknown>) {
     isPublished: Boolean(body.isPublished),
     isArchived: Boolean(body.isArchived),
   };
+}
+
+function parseCreateTalks(value: unknown, language: string) {
+  const fallbackTitle = language === "es" ? "Sesion principal" : "Main session";
+  if (!Array.isArray(value)) {
+    return [{ title: fallbackTitle, speakers: "", role: "" }];
+  }
+
+  const talks = value
+    .slice(0, 40)
+    .map((item) => {
+      const raw = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      return {
+        title: cleanText(String(raw.title ?? "")).slice(0, 160),
+        speakers: cleanText(String(raw.speakers ?? "")).slice(0, 280),
+        role: cleanText(String(raw.role ?? "")).slice(0, 160),
+      };
+    })
+    .filter((talk) => talk.title);
+
+  return talks.length ? talks : [{ title: fallbackTitle, speakers: "", role: "" }];
 }
 
 async function uniqueSlug(sql: Sql, base: string): Promise<string> {
