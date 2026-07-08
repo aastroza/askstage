@@ -1,8 +1,9 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
-type WorkerEnv = Omit<Env, "ALLOW_SIGNUPS"> & {
+type WorkerEnv = Omit<Env, "SUPABASE_URL" | "SUPABASE_ANON_KEY"> & {
   DATABASE_URL: string;
-  ALLOW_SIGNUPS?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
 };
 
 type Sql = NeonQueryFunction<false, false>;
@@ -17,8 +18,10 @@ type UserRow = {
   email: string;
 };
 
-const sessionCookie = "py_session";
-const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+type SupabaseUser = {
+  id: string;
+  email?: string;
+};
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -26,12 +29,12 @@ const jsonHeaders = {
 };
 
 export default {
-  async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
 
     try {
       if (url.pathname.startsWith("/api/")) {
-        return await handleApi(request, env, url, ctx);
+        return await handleApi(request, env, url);
       }
 
       const assetResponse = await env.ASSETS.fetch(request);
@@ -48,7 +51,7 @@ export default {
   },
 } satisfies ExportedHandler<WorkerEnv>;
 
-async function handleApi(request: Request, env: WorkerEnv, url: URL, ctx: ExecutionContext): Promise<Response> {
+async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Response> {
   const sql = neon(env.DATABASE_URL);
   const parts = url.pathname.split("/").filter(Boolean);
 
@@ -57,30 +60,30 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL, ctx: Execut
   }
 
   if (request.method === "GET" && url.pathname === "/api/me") {
-    const user = await currentUser(request, sql);
+    const user = await currentUser(request, env, sql);
     return json({ user });
   }
 
-  if (request.method === "POST" && url.pathname === "/api/auth/signup") {
-    if (env.ALLOW_SIGNUPS === "false") throw createError(403, "Signups are disabled.");
-    return signup(request, sql, url);
+  if (request.method === "GET" && url.pathname === "/api/auth/config") {
+    if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
+      throw createError(500, "Supabase Auth is not configured.");
+    }
+    return json({
+      supabaseUrl: env.SUPABASE_URL,
+      supabaseAnonKey: env.SUPABASE_ANON_KEY,
+    });
   }
 
-  if (request.method === "POST" && url.pathname === "/api/auth/login") {
-    return login(request, sql, url);
+  if (request.method === "POST" && (url.pathname === "/api/auth/signup" || url.pathname === "/api/auth/login")) {
+    throw createError(410, "Password authentication has been replaced by Google sign-in.");
   }
 
   if (request.method === "POST" && url.pathname === "/api/auth/logout") {
-    const token = cookieValue(request, sessionCookie);
-    if (token) {
-      const tokenHash = await sha256(token);
-      ctx.waitUntil(sql`delete from auth_sessions where token_hash = ${tokenHash}`);
-    }
-    return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(url) });
+    return json({ ok: true });
   }
 
   if (parts[1] === "owner") {
-    const user = await requireUser(request, sql);
+    const user = await requireUser(request, env, sql);
 
     if (request.method === "GET" && url.pathname === "/api/owner/events") {
       const events = await listOwnerEvents(sql, user.id);
@@ -143,84 +146,61 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL, ctx: Execut
   throw createError(404, "Route not found.");
 }
 
-async function signup(request: Request, sql: Sql, url: URL): Promise<Response> {
-  const body = await readJson(request);
-  const email = normalizeEmail(assertString(body.email, "email"));
-  const password = assertString(body.password, "password");
-  if (password.length < 10) throw createError(400, "Password must be at least 10 characters.");
+async function currentUser(request: Request, env: WorkerEnv, sql: Sql): Promise<UserRow | null> {
+  const supabaseToken = bearerToken(request);
+  if (!supabaseToken) return null;
 
-  const salt = randomToken(16);
-  const passwordHash = await hashPassword(password, salt);
+  const supabaseUser = await verifySupabaseUser(env, supabaseToken);
+  if (!supabaseUser.email) throw createError(401, "Authenticated user is missing an email address.");
 
-  try {
-    const rows = await sql`
-      insert into users (email, password_hash, password_salt)
-      values (${email}, ${passwordHash}, ${salt})
-      returning id::text, email
-    `;
-    return createSessionResponse(sql, rows[0] as UserRow, url, 201);
-  } catch (error) {
-    if (String(error).includes("users_email_lower_idx")) {
-      throw createError(409, "An account already exists for that email.");
-    }
-    throw error;
-  }
+  return ensureLocalUser(sql, supabaseUser);
 }
 
-async function login(request: Request, sql: Sql, url: URL): Promise<Response> {
-  const body = await readJson(request);
-  const email = normalizeEmail(assertString(body.email, "email"));
-  const password = assertString(body.password, "password");
+function bearerToken(request: Request): string | null {
+  const header = request.headers.get("authorization");
+  if (!header) return null;
 
-  const rows = await sql`
-    select id::text, email, password_hash, password_salt
-    from users
-    where lower(email) = lower(${email})
-    limit 1
-  `;
-  const user = rows[0] as (UserRow & { password_hash: string; password_salt: string }) | undefined;
-  if (!user) throw createError(401, "Invalid email or password.");
-
-  const passwordHash = await hashPassword(password, user.password_salt);
-  if (!(await timingSafeEqual(passwordHash, user.password_hash))) {
-    throw createError(401, "Invalid email or password.");
-  }
-
-  return createSessionResponse(sql, { id: user.id, email: user.email }, url);
+  const [scheme, token] = header.split(/\s+/, 2);
+  if (scheme.toLowerCase() !== "bearer" || !token) return null;
+  return token;
 }
 
-async function createSessionResponse(sql: Sql, user: UserRow, url: URL, status = 200): Promise<Response> {
-  const token = randomToken(32);
-  const tokenHash = await sha256(token);
-  await sql`
-    insert into auth_sessions (user_id, token_hash, expires_at)
-    values (${user.id}, ${tokenHash}, now() + interval '30 days')
-  `;
-
-  return json({ user }, status, { "set-cookie": sessionCookieHeader(token, url) });
-}
-
-async function currentUser(request: Request, sql: Sql): Promise<UserRow | null> {
-  const token = cookieValue(request, sessionCookie);
-  if (!token) return null;
-
-  const tokenHash = await sha256(token);
-  const rows = await sql`
-    select u.id::text, u.email
-    from auth_sessions s
-    join users u on u.id = s.user_id
-    where s.token_hash = ${tokenHash}
-      and s.expires_at > now()
-    limit 1
-  `;
-
-  return (rows[0] as UserRow | undefined) ?? null;
-}
-
-async function requireUser(request: Request, sql: Sql): Promise<UserRow> {
-  const user = await currentUser(request, sql);
+async function requireUser(request: Request, env: WorkerEnv, sql: Sql): Promise<UserRow> {
+  const user = await currentUser(request, env, sql);
   if (!user) throw createError(401, "Authentication required.");
   return user;
+}
+
+async function verifySupabaseUser(env: WorkerEnv, accessToken: string): Promise<SupabaseUser> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
+    throw createError(500, "Supabase Auth is not configured.");
+  }
+
+  const response = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`, {
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) throw createError(401, "Authentication required.");
+
+  const user = (await response.json()) as Partial<SupabaseUser>;
+  if (!user.id) throw createError(401, "Authentication required.");
+  return { id: user.id, email: user.email };
+}
+
+async function ensureLocalUser(sql: Sql, supabaseUser: SupabaseUser): Promise<UserRow> {
+  const email = normalizeEmail(supabaseUser.email ?? "");
+  const rows = await sql`
+    insert into users (email, supabase_user_id, auth_provider)
+    values (${email}, ${supabaseUser.id}, 'supabase')
+    on conflict (supabase_user_id)
+    where supabase_user_id is not null
+    do update set email = excluded.email
+    returning id::text, email
+  `;
+  return rows[0] as UserRow;
 }
 
 async function listOwnerEvents(sql: Sql, userId: string) {
@@ -736,91 +716,6 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
     status,
     headers: { ...jsonHeaders, ...headers },
   });
-}
-
-function sessionCookieHeader(token: string, url: URL): string {
-  const secure = url.protocol === "https:" ? "; Secure" : "";
-  return `${sessionCookie}=${token}; Max-Age=${sessionMaxAgeSeconds}; Path=/; HttpOnly; SameSite=Lax${secure}`;
-}
-
-function clearSessionCookie(url: URL): string {
-  const secure = url.protocol === "https:" ? "; Secure" : "";
-  return `${sessionCookie}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${secure}`;
-}
-
-function cookieValue(request: Request, name: string): string | null {
-  const header = request.headers.get("cookie");
-  if (!header) return null;
-
-  for (const part of header.split(";")) {
-    const [rawKey, ...rawValue] = part.trim().split("=");
-    if (rawKey === name) return rawValue.join("=");
-  }
-
-  return null;
-}
-
-async function hashPassword(password: string, salt: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: toArrayBuffer(base64UrlToBytes(salt)),
-      iterations: 100000,
-    },
-    key,
-    256,
-  );
-  return base64UrlEncode(new Uint8Array(bits));
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return base64UrlEncode(new Uint8Array(digest));
-}
-
-async function timingSafeEqual(left: string, right: string): Promise<boolean> {
-  const leftBytes = new TextEncoder().encode(left);
-  const rightBytes = new TextEncoder().encode(right);
-  if (leftBytes.byteLength !== rightBytes.byteLength) return false;
-
-  let diff = 0;
-  for (let index = 0; index < leftBytes.byteLength; index += 1) {
-    diff |= leftBytes[index] ^ rightBytes[index];
-  }
-  return diff === 0;
-}
-
-function randomToken(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return base64UrlEncode(bytes);
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
 }
 
 function createError(status: number, message: string): ApiError {

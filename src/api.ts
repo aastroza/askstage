@@ -1,7 +1,13 @@
+import { getAccessToken } from "./supabase";
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
+  }
+  if (!headers.has("authorization")) {
+    const accessToken = await getAccessToken().catch(() => null);
+    if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
   }
 
   const response = await fetch(path, {

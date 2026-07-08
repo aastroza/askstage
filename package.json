@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "latest",
+    "@supabase/supabase-js": "^2.110.1",
     "@vitejs/plugin-react": "latest",
     "qrcode": "latest",
     "react": "latest",

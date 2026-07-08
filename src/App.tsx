@@ -2,6 +2,7 @@ import QRCode from "qrcode";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, getErrorMessage } from "./api";
 import { eventCopy } from "./copy";
+import { signInWithGoogle, signOutOfSupabase } from "./supabase";
 import type {
   EventDetail,
   EventSummary,
@@ -67,7 +68,7 @@ export default function App() {
   }
 
   if (!user) {
-    return <AuthScreen onAuth={setUser} />;
+    return <AuthScreen />;
   }
 
   return <OwnerApp user={user} route={route} navigate={setRoute} onLogout={() => setUser(null)} />;
@@ -103,30 +104,18 @@ function parseRoute(pathname: string): Route {
   return { kind: "owner", eventId: null };
 }
 
-function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function loginWithGoogle() {
     setError(null);
     setLoading(true);
 
-    const form = new FormData(event.currentTarget);
-    const email = String(form.get("email") ?? "").trim();
-    const password = String(form.get("password") ?? "");
-
     try {
-      const data = await api<{ user: User }>(`/api/auth/${mode}`, {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      onAuth(data.user);
-      window.history.replaceState(null, "", "/app");
+      await signInWithGoogle();
     } catch (authError) {
       setError(getErrorMessage(authError));
-    } finally {
       setLoading(false);
     }
   }
@@ -139,22 +128,10 @@ function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
           <h1>Live Q&A for any event</h1>
           <p>Create an event page, share a QR code, and let the audience ask and vote from their phones.</p>
         </div>
-        <form className="stack-form" onSubmit={submit}>
-          <label>
-            Email
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={10} required />
-          </label>
-          {error ? <Notice tone="error">{error}</Notice> : null}
-          <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
-          </button>
-        </form>
-        <button className="text-button" type="button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-          {mode === "login" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        <button className="primary-button google-button" type="button" disabled={loading} onClick={loginWithGoogle}>
+          <span className="google-mark" aria-hidden="true">G</span>
+          {loading ? "Redirecting..." : "Continue with Google"}
         </button>
       </section>
     </PageShell>
@@ -202,6 +179,7 @@ function OwnerApp({
   }
 
   async function logout() {
+    await signOutOfSupabase().catch(() => undefined);
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     onLogout();
     window.history.replaceState(null, "", "/");
