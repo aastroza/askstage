@@ -126,7 +126,6 @@ function AuthScreen() {
         <div className="auth-story">
           <BrandMark />
           <div className="auth-copy">
-            <p className="auth-kicker">Live Q&A for talks, panels, and classrooms</p>
             <h1 id="auth-title">Every question in the room, on one screen.</h1>
             <p>
               Create your event, put the QR code on stage, and the audience asks and votes
@@ -136,7 +135,7 @@ function AuthScreen() {
           <div className="auth-actions">
             {error ? <Notice tone="error">{error}</Notice> : null}
             <button className="primary-button google-button" type="button" disabled={loading} onClick={loginWithGoogle}>
-              <span className="google-mark" aria-hidden="true">G</span>
+              <GoogleLogo />
               {loading ? "Redirecting..." : "Continue with Google"}
             </button>
             <p className="auth-footnote">Sign-in is for organizers. Your audience never needs an account.</p>
@@ -235,7 +234,13 @@ function OwnerApp({
           ))}
         </nav>
         <div className="account-row">
-          <span>{user.email}</span>
+          <span className="account-avatar" aria-hidden="true">
+            {user.avatarUrl ? <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" /> : initialsForUser(user)}
+          </span>
+          <span className="account-identity">
+            <strong>{user.name || user.email}</strong>
+            <small>{user.email}</small>
+          </span>
           <button type="button" onClick={logout}>Sign out</button>
         </div>
       </aside>
@@ -575,25 +580,15 @@ function EventEditor({
         method: "PATCH",
         body: JSON.stringify(draft),
       });
-      setEvent(data.event);
-      setDraft(toOwnerPayload(data.event));
-      onEventSaved(data.event);
-      setNotice("Event saved.");
-    } catch (saveError) {
-      setError(getErrorMessage(saveError));
-    }
-  }
-
-  async function saveTalks() {
-    setNotice(null);
-    setError(null);
-    try {
-      const data = await api<{ talks: Talk[] }>(`/api/owner/events/${eventId}/talks`, {
+      const talkData = await api<{ talks: Talk[] }>(`/api/owner/events/${eventId}/talks`, {
         method: "PUT",
         body: JSON.stringify({ talks }),
       });
-      setTalks(data.talks);
-      setNotice("Talks saved.");
+      setEvent(data.event);
+      setDraft(toOwnerPayload(data.event));
+      setTalks(talkData.talks);
+      onEventSaved(data.event);
+      setNotice("Changes saved.");
     } catch (saveError) {
       setError(getErrorMessage(saveError));
     }
@@ -816,6 +811,41 @@ function EventEditor({
                 </label>
               </section>
 
+              <section className="settings-card talk-editor">
+                <header className="settings-card-head with-action">
+                  <div>
+                    <h2>Sessions</h2>
+                    <p>Group speakers who share the same talk. Attendees pick one when they ask.</p>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={() => setTalks((current) => [...current, newTalk(current.length)])}>
+                    <Icon name="plus" />
+                    Add session
+                  </button>
+                </header>
+                <div className="talk-list-editor">
+                  {talks.map((talk, index) => (
+                    <article className="talk-edit-row" key={talk.id}>
+                      <span className="row-number">{index + 1}</span>
+                      <label>
+                        Title
+                        <input value={talk.title} onChange={(input) => updateTalk(talks, setTalks, talk.id, { title: input.currentTarget.value })} />
+                      </label>
+                      <label>
+                        Speakers
+                        <input value={talk.speakers} onChange={(input) => updateTalk(talks, setTalks, talk.id, { speakers: input.currentTarget.value })} />
+                      </label>
+                      <label>
+                        Subtitle
+                        <input value={talk.role} onChange={(input) => updateTalk(talks, setTalks, talk.id, { role: input.currentTarget.value })} />
+                      </label>
+                      <button className="icon-button danger" type="button" aria-label="Remove talk" onClick={() => setTalks((current) => current.filter((item) => item.id !== talk.id))}>
+                        <Icon name="trash" />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
               <section className="settings-card">
                 <header className="settings-card-head">
                   <h2>Advanced</h2>
@@ -827,6 +857,7 @@ function EventEditor({
                     <span className="slug-prefix">{window.location.host}/e/</span>
                     <input value={draft.slug} onChange={(input) => updateDraft("slug", input.currentTarget.value)} required />
                   </span>
+                  <span className="field-hint">Each public link is reserved globally. Save will stop you if another event already uses it.</span>
                 </label>
                 <label className="toggle-row">
                   <span>
@@ -860,44 +891,6 @@ function EventEditor({
                 <button className="primary-button" type="submit">Save changes</button>
               </div>
             </form>
-
-            <section className="settings-card talk-editor">
-              <header className="settings-card-head with-action">
-                <div>
-                  <h2>Sessions</h2>
-                  <p>Group speakers who share the same talk. Attendees pick one when they ask.</p>
-                </div>
-                <button className="secondary-button" type="button" onClick={() => setTalks((current) => [...current, newTalk(current.length)])}>
-                  <Icon name="plus" />
-                  Add session
-                </button>
-              </header>
-              <div className="talk-list-editor">
-                {talks.map((talk, index) => (
-                  <article className="talk-edit-row" key={talk.id}>
-                    <span className="row-number">{index + 1}</span>
-                    <label>
-                      Title
-                      <input value={talk.title} onChange={(input) => updateTalk(talks, setTalks, talk.id, { title: input.currentTarget.value })} />
-                    </label>
-                    <label>
-                      Speakers
-                      <input value={talk.speakers} onChange={(input) => updateTalk(talks, setTalks, talk.id, { speakers: input.currentTarget.value })} />
-                    </label>
-                    <label>
-                      Subtitle
-                      <input value={talk.role} onChange={(input) => updateTalk(talks, setTalks, talk.id, { role: input.currentTarget.value })} />
-                    </label>
-                    <button className="icon-button danger" type="button" aria-label="Remove talk" onClick={() => setTalks((current) => current.filter((item) => item.id !== talk.id))}>
-                      <Icon name="trash" />
-                    </button>
-                  </article>
-                ))}
-              </div>
-              <div className="settings-save-bar">
-                <button className="primary-button" type="button" onClick={saveTalks}>Save sessions</button>
-              </div>
-            </section>
           </div>
 
           <PhonePreview draft={draft} talks={talks} />
@@ -1280,6 +1273,9 @@ function PhonePreview({ draft, talks }: { draft: OwnerEventPayload; talks: Talk[
           { body: "How did you measure the impact of the project?", score: 11 },
         ];
   const talkTitle = talks[0]?.title ?? "";
+  const previewTalks = talks.length
+    ? talks.slice(0, 3)
+    : [{ id: "main", title: draft.language === "es" ? "Sesion principal" : "Main session", speakers: "" }];
 
   return (
     <aside className="phone-preview-panel" aria-label="Attendee page preview">
@@ -1300,6 +1296,23 @@ function PhonePreview({ draft, talks }: { draft: OwnerEventPayload; talks: Talk[
           <button className="preview-ask" type="button" tabIndex={-1}>
             + {askLabel}
           </button>
+          <div className="preview-talk-rail" aria-hidden="true">
+            <span className="selected">
+              <strong>{strings.allTalks}</strong>
+              <small>{talks.length || 1} {strings.allTalksCount}</small>
+            </span>
+            {previewTalks.map((talk) => (
+              <span key={talk.id}>
+                <strong>{talk.title}</strong>
+                {talk.speakers ? <small>{talk.speakers}</small> : null}
+              </span>
+            ))}
+          </div>
+          <div className="preview-filters" aria-hidden="true">
+            <span className="active">{strings.open}</span>
+            <span>{strings.answered}</span>
+            <span>{strings.all}</span>
+          </div>
           <div className="preview-questions">
             {sampleQuestions.map((question) => (
               <article key={question.body} className="preview-question">
@@ -1334,6 +1347,17 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
       <span>?</span>
       <strong>AskStage</strong>
     </div>
+  );
+}
+
+function GoogleLogo() {
+  return (
+    <svg className="google-logo" viewBox="0 0 18 18" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.35 0-4.34-1.58-5.05-3.72H.94v2.33A9 9 0 0 0 9 18Z" />
+      <path fill="#FBBC05" d="M3.95 10.7A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.16.28-1.7V4.97H.94A9 9 0 0 0 0 9c0 1.45.34 2.82.94 4.03l3.01-2.33Z" />
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .94 4.97L3.95 7.3C4.66 5.16 6.65 3.58 9 3.58Z" />
+    </svg>
   );
 }
 
@@ -1471,4 +1495,13 @@ function formatUrl(value: string) {
   } catch {
     return "";
   }
+}
+
+function initialsForUser(user: User) {
+  const source = user.name || user.email;
+  const parts = source
+    .replace(/@.*/, "")
+    .split(/[\s._-]+/)
+    .filter(Boolean);
+  return (parts[0]?.[0] ?? "?").concat(parts[1]?.[0] ?? "").toUpperCase();
 }

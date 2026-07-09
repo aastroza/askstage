@@ -16,11 +16,14 @@ type ApiError = {
 type UserRow = {
   id: string;
   email: string;
+  name?: string;
+  avatarUrl?: string;
 };
 
 type SupabaseUser = {
   id: string;
   email?: string;
+  user_metadata?: Record<string, unknown>;
 };
 
 const jsonHeaders = {
@@ -153,7 +156,13 @@ async function currentUser(request: Request, env: WorkerEnv, sql: Sql): Promise<
   const supabaseUser = await verifySupabaseUser(env, supabaseToken);
   if (!supabaseUser.email) throw createError(401, "Authenticated user is missing an email address.");
 
-  return ensureLocalUser(sql, supabaseUser);
+  const user = await ensureLocalUser(sql, supabaseUser);
+  const metadata = supabaseUser.user_metadata ?? {};
+  return {
+    ...user,
+    name: profileName(metadata, user.email),
+    avatarUrl: profileAvatarUrl(metadata),
+  };
 }
 
 function bearerToken(request: Request): string | null {
@@ -187,7 +196,7 @@ async function verifySupabaseUser(env: WorkerEnv, accessToken: string): Promise<
 
   const user = (await response.json()) as Partial<SupabaseUser>;
   if (!user.id) throw createError(401, "Authentication required.");
-  return { id: user.id, email: user.email };
+  return { id: user.id, email: user.email, user_metadata: user.user_metadata };
 }
 
 async function ensureLocalUser(sql: Sql, supabaseUser: SupabaseUser): Promise<UserRow> {
@@ -694,6 +703,17 @@ function normalizeEmail(value: string): string {
   const email = value.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw createError(400, "Invalid email.");
   return email;
+}
+
+function profileName(metadata: Record<string, unknown>, email: string): string {
+  const value = metadata.full_name ?? metadata.name;
+  if (typeof value === "string" && value.trim()) return cleanText(value).slice(0, 120);
+  return email.split("@")[0] ?? email;
+}
+
+function profileAvatarUrl(metadata: Record<string, unknown>): string {
+  const value = metadata.avatar_url ?? metadata.picture;
+  return typeof value === "string" && isHttpUrl(value) ? value : "";
 }
 
 function assertString(value: unknown, name: string): string {
