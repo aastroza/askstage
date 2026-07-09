@@ -37,6 +37,7 @@ export type Talk = {
 
 export type PublicEvent = EventDetail & {
   talks: Talk[];
+  turnstileSiteKey?: string;
 };
 
 export type QuestionStatus = "open" | "answered" | "hidden";

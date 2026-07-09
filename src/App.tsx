@@ -1,8 +1,8 @@
 import QRCode from "qrcode";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, getErrorMessage } from "./api";
 import { eventCopy } from "./copy";
-import { signInWithGoogle, signOutOfSupabase } from "./supabase";
+import { getAccessToken, signInWithGoogle, signOutOfSupabase } from "./supabase";
 import type {
   EventDetail,
   EventSummary,
@@ -27,6 +27,28 @@ type EventDetailResponse = {
   event: EventDetail;
   talks: Talk[];
 };
+
+type TurnstileApi = {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      callback: (token: string) => void;
+      "expired-callback": () => void;
+      "error-callback": () => void;
+      appearance?: "always" | "execute" | "interaction-only";
+      theme?: "auto" | "light" | "dark";
+    },
+  ) => string;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
 
 type CreateEventPayload = {
   title: string;
@@ -576,6 +598,17 @@ function EventEditor({
     return () => window.clearInterval(interval);
   }, [eventId, event]);
 
+  useEffect(() => {
+    if (!event) return;
+    const controller = new AbortController();
+
+    void streamOwnerQuestions(eventId, controller.signal, () => {
+      if (document.visibilityState === "visible") void loadQuestions();
+    });
+
+    return () => controller.abort();
+  }, [eventId, event]);
+
   async function saveEvent(formEvent: FormEvent) {
     formEvent.preventDefault();
     if (!draft) return;
@@ -927,7 +960,6 @@ function PublicEventPage({ slug }: { slug: string }) {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
-  const voterId = useMemo(getOrCreateVoterId, []);
 
   const strings = eventCopy(event?.language ?? "en");
 
@@ -937,6 +969,7 @@ function PublicEventPage({ slug }: { slug: string }) {
     try {
       const data = await api<{ event: PublicEvent }>(`/api/public/events/${slug}`);
       setEvent(data.event);
+      await ensureVoterToken();
       await loadQuestions(data.event.id);
     } catch (loadError) {
       setError(getErrorMessage(loadError));
@@ -948,9 +981,13 @@ function PublicEventPage({ slug }: { slug: string }) {
   async function loadQuestions(_: string = event?.id ?? "") {
     const talkParam = selectedTalk === "all" ? "" : `&talkId=${selectedTalk}`;
     const data = await api<{ questions: Question[] }>(
-      `/api/public/events/${slug}/questions?voterId=${encodeURIComponent(voterId)}&status=${filter}${talkParam}`,
+      `/api/public/events/${slug}/questions?status=${filter}${talkParam}`,
     );
     setQuestions(data.questions);
+  }
+
+  async function ensureVoterToken() {
+    await api(`/api/public/events/${slug}/voter`, { method: "POST" });
   }
 
   useEffect(() => {
@@ -972,6 +1009,21 @@ function PublicEventPage({ slug }: { slug: string }) {
   }, [event, filter, selectedTalk]);
 
   useEffect(() => {
+    if (!event) return;
+    const source = new EventSource(`/api/public/events/${slug}/stream`);
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadQuestions(event.id);
+    };
+
+    source.addEventListener("questions_changed", refresh);
+    source.onerror = () => source.close();
+    return () => {
+      source.removeEventListener("questions_changed", refresh);
+      source.close();
+    };
+  }, [event, slug, filter, selectedTalk]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("askstage-theme", theme);
   }, [theme]);
@@ -983,11 +1035,14 @@ function PublicEventPage({ slug }: { slug: string }) {
     const talkId = String(form.get("talkId") ?? "");
     const body = String(form.get("body") ?? "").trim();
     const authorName = String(form.get("authorName") ?? "").trim();
+    const website = String(form.get("website") ?? "").trim();
+    const turnstileToken = String(form.get("turnstileToken") ?? "").trim();
 
     try {
+      await ensureVoterToken();
       await api(`/api/public/events/${slug}/questions`, {
         method: "POST",
-        body: JSON.stringify({ talkId, body, authorName }),
+        body: JSON.stringify({ talkId, body, authorName, website, turnstileToken }),
       });
       setSheetOpen(false);
       setSubmitted(true);
@@ -1008,9 +1063,10 @@ function PublicEventPage({ slug }: { slug: string }) {
       }),
     );
     try {
+      await ensureVoterToken();
       await api("/api/public/votes", {
         method: "POST",
-        body: JSON.stringify({ questionId, voterId, value }),
+        body: JSON.stringify({ questionId, value }),
       });
       await loadQuestions(event?.id ?? "");
     } catch (voteError) {
@@ -1102,6 +1158,10 @@ function QuestionSheet({
           </button>
         </div>
         <form className="question-form" onSubmit={onSubmit}>
+          <label className="honeypot-field" aria-hidden="true">
+            Website
+            <input name="website" autoComplete="off" tabIndex={-1} />
+          </label>
           <fieldset className="sheet-talks">
             <legend>{strings.talk}</legend>
             {event.talks.map((talk) => (
@@ -1122,6 +1182,7 @@ function QuestionSheet({
             {strings.nameOptional}
             <input name="authorName" maxLength={80} placeholder={strings.namePlaceholder} />
           </label>
+          {event.turnstileSiteKey ? <TurnstileField siteKey={event.turnstileSiteKey} /> : null}
           <button className="primary-button" type="submit">
             <Icon name="send" />
             {strings.send}
@@ -1130,6 +1191,67 @@ function QuestionSheet({
       </section>
     </div>
   );
+}
+
+function TurnstileField({ siteKey }: { siteKey: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const [token, setToken] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadTurnstileScript()
+      .then(() => {
+        if (cancelled || !containerRef.current || !window.turnstile || widgetIdRef.current) return;
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          appearance: "interaction-only",
+          theme: "auto",
+          callback: setToken,
+          "expired-callback": () => setToken(""),
+          "error-callback": () => setToken(""),
+        });
+      })
+      .catch(() => setToken(""));
+
+    return () => {
+      cancelled = true;
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
+    };
+  }, [siteKey]);
+
+  return (
+    <div className="turnstile-field">
+      <div ref={containerRef} />
+      <input type="hidden" name="turnstileToken" value={token} readOnly />
+    </div>
+  );
+}
+
+function loadTurnstileScript(): Promise<void> {
+  if (window.turnstile) return Promise.resolve();
+  const existing = document.querySelector<HTMLScriptElement>("script[data-turnstile-script]");
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Turnstile failed to load.")), { once: true });
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.dataset.turnstileScript = "true";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Turnstile failed to load."));
+    document.head.appendChild(script);
+  });
 }
 
 function TalkRail({
@@ -1482,19 +1604,46 @@ function getDefaultLanguage(): Language {
   return navigator.language.toLowerCase().startsWith("es") ? "es" : "en";
 }
 
-function getOrCreateVoterId() {
-  const key = "askstage-voter-id";
-  const existing = localStorage.getItem(key);
-  if (existing) return existing;
-  const id = crypto.randomUUID();
-  localStorage.setItem(key, id);
-  return id;
-}
-
 function getInitialTheme(): "light" | "dark" {
   const stored = localStorage.getItem("askstage-theme");
   if (stored === "light" || stored === "dark") return stored;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+async function streamOwnerQuestions(eventId: string, signal: AbortSignal, onQuestionsChanged: () => void): Promise<void> {
+  const accessToken = await getAccessToken().catch(() => null);
+  if (!accessToken || signal.aborted) return;
+
+  const response = await fetch(`/api/owner/events/${eventId}/stream`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+    credentials: "same-origin",
+    signal,
+  }).catch(() => null);
+  if (!response?.ok || !response.body) return;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const eventBlock = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (eventBlock.includes("event: questions_changed")) onQuestionsChanged();
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+  } catch {
+    // Polling remains the fallback for transient stream failures.
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function slugifyFileName(value: string) {

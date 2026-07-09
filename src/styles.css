@@ -370,6 +370,15 @@ label,
   line-height: 1.4;
 }
 
+.honeypot-field {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 input,
 textarea,
 select {
@@ -1779,6 +1788,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .question-form .primary-button {
   width: 100%;
   min-height: 50px;
+}
+
+.turnstile-field {
+  min-height: 1px;
+}
+
+.turnstile-field iframe {
+  max-width: 100%;
 }
 
 .talk-rail {

@@ -1,70 +1,97 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
+import {
+  currentUser,
+  requireUser,
+  type UserRow,
+  validateSupabaseClaims,
+} from "./server/auth";
+import {
+  canonicalOriginResponse,
+  contentSecurityPolicy,
+  createError,
+  json,
+  normalizeError,
+  withSecurityHeaders,
+} from "./server/http";
+import {
+  base64UrlDecode,
+  base64UrlEncode,
+  clientIp,
+  cookieValue,
+  createVoterToken,
+  enforceRateLimit,
+  optionalVoterToken,
+  rateLimitKey,
+  requireVoterToken,
+  type RateLimitBinding,
+  type VoterTokenPayload,
+  verifyVoterToken,
+  voterCookie,
+} from "./server/voterSecurity";
+import {
+  assertQuestionStatus,
+  assertString,
+  cleanText,
+  isHttpUrl,
+  normalizeQuestionBody,
+  normalizeSlug,
+  readJson,
+  safeUuid,
+  slugFromTitle,
+} from "./server/validation";
+import * as repository from "./server/repositories";
+import type { Sql, TalkPayload } from "./server/repositories";
+import { broadcastQuestionsChanged, createQuestionStream } from "./server/realtime";
 
 type WorkerEnv = Omit<Env, "SUPABASE_URL" | "SUPABASE_ANON_KEY"> & {
   DATABASE_URL: string;
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
+  SUPABASE_JWT_AUDIENCE?: string;
+  PUBLIC_ORIGIN?: string;
+  PUBLIC_TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  VOTER_TOKEN_SECRET?: string;
+  PUBLIC_QUESTION_RATE_LIMIT?: RateLimitBinding;
+  PUBLIC_VOTE_RATE_LIMIT?: RateLimitBinding;
+  PUBLIC_QUESTION_READ_RATE_LIMIT?: RateLimitBinding;
 };
 
-type Sql = NeonQueryFunction<false, false>;
-
-type ApiError = {
-  status: number;
-  message: string;
-};
-
-type UserRow = {
-  id: string;
-  email: string;
-  name?: string;
-  avatarUrl?: string;
-};
-
-type SupabaseUser = {
-  id: string;
-  email?: string;
-  user_metadata?: Record<string, unknown>;
-};
-
-const jsonHeaders = {
-  "content-type": "application/json; charset=utf-8",
-  "cache-control": "no-store",
-};
+let sqlFactory = neon;
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
 
     try {
-      if (url.pathname.startsWith("/api/")) {
-        return await handleApi(request, env, url);
+      const originResponse = canonicalOriginResponse(request, env, url);
+      if (originResponse) {
+        return withSecurityHeaders(originResponse, url);
       }
 
-      const assetResponse = await env.ASSETS.fetch(request);
+      if (url.pathname.startsWith("/api/")) {
+        return withSecurityHeaders(await handleApi(request, env, url), url);
+      }
+
+      const assetResponse = withSecurityHeaders(await env.ASSETS.fetch(request), url);
       const acceptsHtml = request.headers.get("accept")?.includes("text/html");
       if (assetResponse.status !== 404 || !acceptsHtml) {
         return assetResponse;
       }
 
-      return env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
+      return withSecurityHeaders(await env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request)), url);
     } catch (error) {
       const apiError = normalizeError(error);
-      return json({ error: apiError.message }, apiError.status);
+      return withSecurityHeaders(json({ error: apiError.message }, apiError.status), url);
     }
   },
 } satisfies ExportedHandler<WorkerEnv>;
 
 async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Response> {
-  const sql = neon(env.DATABASE_URL);
   const parts = url.pathname.split("/").filter(Boolean);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
     return json({ ok: true });
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/me") {
-    const user = await currentUser(request, env, sql);
-    return json({ user });
   }
 
   if (request.method === "GET" && url.pathname === "/api/auth/config") {
@@ -85,11 +112,22 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Re
     return json({ ok: true });
   }
 
+  if (url.pathname !== "/api/me" && parts[1] !== "owner" && parts[1] !== "public") {
+    throw createError(404, "Route not found.");
+  }
+
+  const sql = sqlFactory(env.DATABASE_URL);
+
+  if (request.method === "GET" && url.pathname === "/api/me") {
+    const user = await currentUser(request, env, sql);
+    return json({ user });
+  }
+
   if (parts[1] === "owner") {
     const user = await requireUser(request, env, sql);
 
     if (request.method === "GET" && url.pathname === "/api/owner/events") {
-      const events = await listOwnerEvents(sql, user.id);
+      const events = await repository.listOwnerEvents(sql, user.id);
       return json({ events });
     }
 
@@ -101,7 +139,7 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Re
       const eventId = parts[3];
 
       if (request.method === "GET" && parts.length === 4) {
-        const data = await getOwnerEvent(sql, user.id, eventId);
+        const data = await repository.getOwnerEvent(sql, user.id, eventId);
         return json(data);
       }
 
@@ -113,8 +151,12 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Re
         return replaceTalks(request, sql, user.id, eventId);
       }
 
+      if (request.method === "GET" && parts[4] === "stream") {
+        return streamOwnerQuestions(sql, user.id, eventId);
+      }
+
       if (request.method === "GET" && parts[4] === "questions") {
-        const questions = await listOwnerQuestions(sql, user.id, eventId);
+        const questions = await repository.listOwnerQuestions(sql, user.id, eventId);
         return json({ questions });
       }
     }
@@ -126,227 +168,85 @@ async function handleApi(request: Request, env: WorkerEnv, url: URL): Promise<Re
 
   if (parts[1] === "public") {
     if (request.method === "GET" && parts[2] === "events" && parts[3] && parts.length === 4) {
-      const event = await getPublicEvent(sql, parts[3]);
+      const event = await getPublicEvent(env, sql, parts[3]);
       return json({ event });
+    }
+
+    if (request.method === "POST" && parts[2] === "events" && parts[3] && parts[4] === "voter" && parts.length === 5) {
+      return issuePublicVoter(request, env, sql, parts[3]);
+    }
+
+    if (request.method === "GET" && parts[2] === "events" && parts[3] && parts[4] === "stream" && parts.length === 5) {
+      return streamPublicQuestions(sql, parts[3]);
     }
 
     if (parts[2] === "events" && parts[3] && parts[4] === "questions") {
       if (request.method === "GET") {
-        const questions = await listPublicQuestions(sql, parts[3], url);
+        const questions = await listPublicQuestions(request, env, sql, parts[3], url);
         return json({ questions });
       }
 
       if (request.method === "POST") {
-        return createPublicQuestion(request, sql, parts[3]);
+        return createPublicQuestion(request, env, sql, parts[3]);
       }
     }
 
     if (request.method === "POST" && url.pathname === "/api/public/votes") {
-      return vote(request, sql);
+      return vote(request, env, sql);
     }
   }
 
   throw createError(404, "Route not found.");
 }
 
-async function currentUser(request: Request, env: WorkerEnv, sql: Sql): Promise<UserRow | null> {
-  const supabaseToken = bearerToken(request);
-  if (!supabaseToken) return null;
-
-  const supabaseUser = await verifySupabaseUser(env, supabaseToken);
-  if (!supabaseUser.email) throw createError(401, "Authenticated user is missing an email address.");
-
-  const user = await ensureLocalUser(sql, supabaseUser);
-  const metadata = supabaseUser.user_metadata ?? {};
-  return {
-    ...user,
-    name: profileName(metadata, user.email),
-    avatarUrl: profileAvatarUrl(metadata),
-  };
-}
-
-function bearerToken(request: Request): string | null {
-  const header = request.headers.get("authorization");
-  if (!header) return null;
-
-  const [scheme, token] = header.split(/\s+/, 2);
-  if (scheme.toLowerCase() !== "bearer" || !token) return null;
-  return token;
-}
-
-async function requireUser(request: Request, env: WorkerEnv, sql: Sql): Promise<UserRow> {
-  const user = await currentUser(request, env, sql);
-  if (!user) throw createError(401, "Authentication required.");
-  return user;
-}
-
-async function verifySupabaseUser(env: WorkerEnv, accessToken: string): Promise<SupabaseUser> {
-  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
-    throw createError(500, "Supabase Auth is not configured.");
-  }
-
-  const response = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`, {
-    headers: {
-      apikey: env.SUPABASE_ANON_KEY,
-      authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) throw createError(401, "Authentication required.");
-
-  const user = (await response.json()) as Partial<SupabaseUser>;
-  if (!user.id) throw createError(401, "Authentication required.");
-  return { id: user.id, email: user.email, user_metadata: user.user_metadata };
-}
-
-async function ensureLocalUser(sql: Sql, supabaseUser: SupabaseUser): Promise<UserRow> {
-  const email = normalizeEmail(supabaseUser.email ?? "");
-  const rows = await sql`
-    insert into users (email, supabase_user_id, auth_provider)
-    values (${email}, ${supabaseUser.id}, 'supabase')
-    on conflict (supabase_user_id)
-    where supabase_user_id is not null
-    do update set email = excluded.email
-    returning id::text, email
-  `;
-  return rows[0] as UserRow;
-}
-
-async function listOwnerEvents(sql: Sql, userId: string) {
-  return sql`
-    select
-      id::text,
-      slug,
-      title,
-      date_label as "dateLabel",
-      location_label as "locationLabel",
-      language,
-      is_published as "isPublished",
-      is_archived as "isArchived",
-      updated_at as "updatedAt"
-    from events
-    where owner_id = ${userId}
-    order by updated_at desc
-  `;
-}
-
 async function createOwnerEvent(request: Request, sql: Sql, userId: string): Promise<Response> {
   const body = await readJson(request);
   const title = cleanText(typeof body.title === "string" ? body.title : "Untitled event").slice(0, 140) || "Untitled event";
-  const slug = await uniqueSlug(sql, slugFromTitle(title));
+  const slug = await repository.uniqueSlug(sql, slugFromTitle(title));
   const language = body.language === "es" ? "es" : "en";
   const dateLabel = cleanText(String(body.dateLabel ?? "")).slice(0, 80);
   const locationLabel = cleanText(String(body.locationLabel ?? "")).slice(0, 80);
   const talks = parseCreateTalks(body.talks, language);
+  const eventId = crypto.randomUUID();
 
-  const rows = await sql`
-    insert into events (owner_id, slug, title, date_label, location_label, language, intro_text, ask_button_label, footer_label, footer_url)
-    values (${userId}, ${slug}, ${title}, ${dateLabel}, ${locationLabel}, ${language}, '', '', '', '')
-    returning
-      id::text,
-      slug,
-      title,
-      date_label as "dateLabel",
-      location_label as "locationLabel",
-      language,
-      is_published as "isPublished",
-      is_archived as "isArchived",
-      updated_at as "updatedAt"
-  `;
+  const event = await repository.createOwnerEventWithTalks(sql, {
+    eventId,
+    ownerId: userId,
+    slug,
+    title,
+    dateLabel,
+    locationLabel,
+    language,
+    talks,
+  });
 
-  for (const [index, talk] of talks.entries()) {
-    await sql`
-      insert into event_talks (event_id, title, speakers, role, position)
-      values (${rows[0].id}, ${talk.title}, ${talk.speakers}, ${talk.role}, ${index})
-    `;
-  }
-
-  return json({ event: rows[0] }, 201);
-}
-
-async function getOwnerEvent(sql: Sql, userId: string, eventId: string) {
-  const eventRows = await sql`
-    select
-      id::text,
-      slug,
-      title,
-      date_label as "dateLabel",
-      location_label as "locationLabel",
-      language,
-      intro_text as "introText",
-      ask_button_label as "askButtonLabel",
-      footer_label as "footerLabel",
-      footer_url as "footerUrl",
-      accent_color as "accentColor",
-      is_published as "isPublished",
-      is_archived as "isArchived",
-      updated_at as "updatedAt"
-    from events
-    where id = ${eventId} and owner_id = ${userId}
-    limit 1
-  `;
-  const event = eventRows[0] as (Record<string, unknown> & { id: string }) | undefined;
-  if (!event) throw createError(404, "Event not found.");
-
-  const talks = await listTalks(sql, eventId);
-  return { event, talks };
+  return json({ event }, 201);
 }
 
 async function updateOwnerEvent(request: Request, sql: Sql, userId: string, eventId: string): Promise<Response> {
   const body = await readJson(request);
-  await assertOwnsEvent(sql, userId, eventId);
+  await repository.assertOwnsEvent(sql, userId, eventId);
 
   const payload = parseEventPayload(body);
   try {
-    const rows = await sql`
-      update events
-      set
-        slug = ${payload.slug},
-        title = ${payload.title},
-        date_label = ${payload.dateLabel},
-        location_label = ${payload.locationLabel},
-        language = ${payload.language},
-        intro_text = ${payload.introText},
-        ask_button_label = ${payload.askButtonLabel},
-        footer_label = ${payload.footerLabel},
-        footer_url = ${payload.footerUrl},
-        accent_color = ${payload.accentColor},
-        is_published = ${payload.isPublished},
-        is_archived = ${payload.isArchived},
-        updated_at = now()
-      where id = ${eventId} and owner_id = ${userId}
-      returning
-        id::text,
-        slug,
-        title,
-        date_label as "dateLabel",
-        location_label as "locationLabel",
-        language,
-        intro_text as "introText",
-        ask_button_label as "askButtonLabel",
-        footer_label as "footerLabel",
-        footer_url as "footerUrl",
-        accent_color as "accentColor",
-        is_published as "isPublished",
-        is_archived as "isArchived",
-        updated_at as "updatedAt"
-    `;
-    return json({ event: rows[0] });
+    const event = await repository.updateOwnerEventRow(sql, userId, eventId, payload);
+    return json({ event });
   } catch (error) {
-    if (String(error).includes("events_slug_key")) throw createError(409, "That slug is already in use.");
+    if (repository.isUniqueViolation(error, "events_slug_key")) throw createError(409, "That slug is already in use.");
     throw error;
   }
 }
 
 async function replaceTalks(request: Request, sql: Sql, userId: string, eventId: string): Promise<Response> {
-  await assertOwnsEvent(sql, userId, eventId);
+  await repository.assertOwnsEvent(sql, userId, eventId);
   const body = await readJson(request);
   const incoming = Array.isArray(body.talks) ? body.talks : [];
   if (!incoming.length) throw createError(400, "At least one talk is required.");
   if (incoming.length > 40) throw createError(400, "An event can have up to 40 talks.");
 
-  const existingRows = await sql`select id::text from event_talks where event_id = ${eventId}`;
-  const existingIds = new Set(existingRows.map((row) => String(row.id)));
+  const existingTalkIds = await repository.listTalkIds(sql, eventId);
+  const existingIds = new Set(existingTalkIds);
+  const talkPayloads: TalkPayload[] = [];
   const nextIds = new Set<string>();
 
   for (let index = 0; index < incoming.length; index += 1) {
@@ -356,184 +256,79 @@ async function replaceTalks(request: Request, sql: Sql, userId: string, eventId:
     const speakers = cleanText(typeof raw.speakers === "string" ? raw.speakers : "").slice(0, 280);
     const role = cleanText(typeof raw.role === "string" ? raw.role : "").slice(0, 160);
     nextIds.add(id);
-
-    await sql`
-      insert into event_talks (id, event_id, title, speakers, role, position, updated_at)
-      values (${id}, ${eventId}, ${title}, ${speakers}, ${role}, ${index}, now())
-      on conflict (id)
-      do update set
-        title = excluded.title,
-        speakers = excluded.speakers,
-        role = excluded.role,
-        position = excluded.position,
-        updated_at = now()
-    `;
+    talkPayloads.push({ id, title, speakers, role, position: index });
   }
 
-  for (const row of existingRows) {
-    const id = String(row.id);
-    if (!nextIds.has(id)) {
-      await sql`delete from event_talks where id = ${id} and event_id = ${eventId}`;
-    }
-  }
+  const deletedIds = existingTalkIds.filter((id) => !nextIds.has(id));
 
-  await sql`update events set updated_at = now() where id = ${eventId}`;
-  const talks = await listTalks(sql, eventId);
+  await repository.replaceEventTalks(sql, eventId, talkPayloads, deletedIds);
+
+  broadcastQuestionsChanged(eventId);
+  const talks = await repository.listTalks(sql, eventId);
   return json({ talks });
 }
 
-async function listOwnerQuestions(sql: Sql, userId: string, eventId: string) {
-  await assertOwnsEvent(sql, userId, eventId);
-  return sql`
-    select
-      q.id::text,
-      q.event_id as "eventId",
-      q.talk_id as "talkId",
-      q.body,
-      q.author_name as "authorName",
-      q.status,
-      q.pinned,
-      q.created_at as "createdAt",
-      t.title as "talkTitle",
-      t.speakers as "talkSpeakers",
-      coalesce(v.score, 0)::int as score
-    from questions q
-    left join event_talks t on t.id = q.talk_id
-    left join (
-      select question_id, sum(value)::int as score
-      from question_votes
-      group by question_id
-    ) v on v.question_id = q.id
-    where q.event_id = ${eventId}
-    order by q.pinned desc, q.status asc, score desc, q.created_at asc
-    limit 300
-  `;
+async function streamOwnerQuestions(sql: Sql, userId: string, eventId: string): Promise<Response> {
+  await repository.assertOwnsEvent(sql, userId, eventId);
+  return createQuestionStream(eventId);
 }
 
 async function updateOwnerQuestion(request: Request, sql: Sql, userId: string, questionId: string): Promise<Response> {
   const body = await readJson(request);
-  const rows = await sql`
-    select q.id::text, q.status, q.pinned
-    from questions q
-    join events e on e.id = q.event_id
-    where q.id = ${questionId} and e.owner_id = ${userId}
-    limit 1
-  `;
-  const question = rows[0] as { id: string; status: string; pinned: boolean } | undefined;
+  const question = await repository.getOwnerQuestionForUpdate(sql, userId, questionId);
   if (!question) throw createError(404, "Question not found.");
 
   const status = body.status === undefined ? question.status : assertQuestionStatus(body.status);
   const pinned = typeof body.pinned === "boolean" ? body.pinned : question.pinned;
-  const updated = await sql`
-    update questions
-    set status = ${status}, pinned = ${pinned}, updated_at = now()
-    where id = ${questionId}
-    returning id::text, status, pinned
-  `;
+  const questionUpdate = await repository.updateQuestionModeration(sql, questionId, status, pinned);
 
-  return json({ question: updated[0] });
+  broadcastQuestionsChanged(question.eventId);
+  return json({ question: questionUpdate });
 }
 
-async function getPublicEvent(sql: Sql, slug: string) {
-  const eventRows = await sql`
-    select
-      id::text,
-      slug,
-      title,
-      date_label as "dateLabel",
-      location_label as "locationLabel",
-      language,
-      intro_text as "introText",
-      ask_button_label as "askButtonLabel",
-      footer_label as "footerLabel",
-      footer_url as "footerUrl",
-      accent_color as "accentColor",
-      is_published as "isPublished",
-      is_archived as "isArchived",
-      updated_at as "updatedAt"
-    from events
-    where slug = ${slug}
-      and is_published = true
-      and is_archived = false
-    limit 1
-  `;
-  const event = eventRows[0] as (Record<string, unknown> & { id: string }) | undefined;
-  if (!event) throw createError(404, "Event not found.");
-
-  const talks = await listTalks(sql, String(event.id));
-  return { ...event, talks };
+async function getPublicEvent(env: WorkerEnv, sql: Sql, slug: string) {
+  const event = await repository.getPublicEvent(sql, slug);
+  return { ...event, turnstileSiteKey: env.PUBLIC_TURNSTILE_SITE_KEY || undefined };
 }
 
-async function listPublicQuestions(sql: Sql, slug: string, url: URL) {
-  const event = await getPublicEvent(sql, slug);
-  const voterId = safeVoterId(url.searchParams.get("voterId"));
+async function issuePublicVoter(request: Request, env: WorkerEnv, sql: Sql, slug: string): Promise<Response> {
+  const event = await repository.getPublicEventAccess(sql, slug);
+  const existing = await optionalVoterToken(request, env, String(event.id));
+  if (existing) return json({ ok: true });
+
+  const token = await createVoterToken(env, String(event.id));
+  return json(
+    { ok: true },
+    200,
+    { "set-cookie": voterCookie(token, new URL(request.url)) },
+  );
+}
+
+async function streamPublicQuestions(sql: Sql, slug: string): Promise<Response> {
+  const event = await repository.getPublicEventAccess(sql, slug);
+  return createQuestionStream(String(event.id));
+}
+
+async function listPublicQuestions(request: Request, env: WorkerEnv, sql: Sql, slug: string, url: URL) {
+  const event = await repository.getPublicEventAccess(sql, slug);
+  await enforceRateLimit(env.PUBLIC_QUESTION_READ_RATE_LIMIT, env, ["questions", String(event.id), clientIp(request)]);
+  const voter = await optionalVoterToken(request, env, String(event.id));
+  const voterId = voter?.voterId ?? "";
   const status = url.searchParams.get("status") ?? "open";
   const talkId = safeUuid(url.searchParams.get("talkId"));
 
-  if (talkId) {
-    return sql`
-      select
-        q.id::text,
-        q.event_id as "eventId",
-        q.talk_id as "talkId",
-        q.body,
-        q.author_name as "authorName",
-        q.status,
-        q.pinned,
-        q.created_at as "createdAt",
-        t.title as "talkTitle",
-        t.speakers as "talkSpeakers",
-        coalesce(v.score, 0)::int as score,
-        coalesce(uv.value, 0)::int as "userVote"
-      from questions q
-      left join event_talks t on t.id = q.talk_id
-      left join (
-        select question_id, sum(value)::int as score
-        from question_votes
-        group by question_id
-      ) v on v.question_id = q.id
-      left join question_votes uv on uv.question_id = q.id and uv.voter_id = ${voterId}
-      where q.event_id = ${event.id}
-        and q.status <> 'hidden'
-        and (${status} = 'all' or (${status} = 'answered' and q.status = 'answered') or (${status} = 'open' and q.status = 'open'))
-        and q.talk_id = ${talkId}
-      order by q.pinned desc, score desc, q.created_at asc
-      limit 200
-    `;
-  }
-
-  return sql`
-    select
-      q.id::text,
-      q.event_id as "eventId",
-      q.talk_id as "talkId",
-      q.body,
-      q.author_name as "authorName",
-      q.status,
-      q.pinned,
-      q.created_at as "createdAt",
-      t.title as "talkTitle",
-      t.speakers as "talkSpeakers",
-      coalesce(v.score, 0)::int as score,
-      coalesce(uv.value, 0)::int as "userVote"
-    from questions q
-    left join event_talks t on t.id = q.talk_id
-    left join (
-      select question_id, sum(value)::int as score
-      from question_votes
-      group by question_id
-    ) v on v.question_id = q.id
-    left join question_votes uv on uv.question_id = q.id and uv.voter_id = ${voterId}
-    where q.event_id = ${event.id}
-      and q.status <> 'hidden'
-      and (${status} = 'all' or (${status} = 'answered' and q.status = 'answered') or (${status} = 'open' and q.status = 'open'))
-    order by q.pinned desc, score desc, q.created_at asc
-    limit 200
-  `;
+  return repository.listPublicQuestions(sql, String(event.id), { status, talkId, voterId });
 }
-async function createPublicQuestion(request: Request, sql: Sql, slug: string): Promise<Response> {
+async function createPublicQuestion(request: Request, env: WorkerEnv, sql: Sql, slug: string): Promise<Response> {
   const body = await readJson(request);
-  const event = await getPublicEvent(sql, slug);
+  if (body.website) return json({ ok: true }, 201);
+
+  const event = await repository.getPublicEventAccess(sql, slug);
+  const voter = await requireVoterToken(request, env);
+  if (voter.eventId !== String(event.id)) throw createError(403, "Question is not allowed.");
+  await verifyTurnstileIfConfigured(request, env, body.turnstileToken);
+  await enforceRateLimit(env.PUBLIC_QUESTION_RATE_LIMIT, env, ["question", String(event.id), voter.voterId, clientIp(request)]);
+
   const talkId = assertString(body.talkId, "talkId");
   const questionBody = cleanText(assertString(body.body, "body"));
   const authorName = body.authorName ? cleanText(String(body.authorName)).slice(0, 80) : null;
@@ -542,61 +337,74 @@ async function createPublicQuestion(request: Request, sql: Sql, slug: string): P
     throw createError(400, "Question must be between 8 and 280 characters.");
   }
 
-  const talkRows = await sql`
-    select id::text from event_talks
-    where id = ${talkId} and event_id = ${event.id}
-    limit 1
-  `;
-  if (!talkRows[0]) throw createError(400, "Talk does not belong to this event.");
+  const talkIsValid = await repository.talkBelongsToEvent(sql, String(event.id), talkId);
+  if (!talkIsValid) throw createError(400, "Talk does not belong to this event.");
 
-  const rows = await sql`
-    insert into questions (event_id, talk_id, body, author_name)
-    values (${event.id}, ${talkId}, ${questionBody}, ${authorName})
-    returning id::text
-  `;
+  const normalizedQuestion = normalizeQuestionBody(questionBody);
+  const isDuplicate = await repository.findRecentDuplicateQuestion(sql, {
+    eventId: String(event.id),
+    voterId: voter.voterId,
+    normalizedQuestion,
+  });
+  if (isDuplicate) throw createError(429, "Please wait before sending that question again.");
 
-  return json({ question: rows[0] }, 201);
+  const question = await repository.insertPublicQuestion(sql, {
+    eventId: String(event.id),
+    talkId,
+    body: questionBody,
+    authorName,
+    voterId: voter.voterId,
+  });
+
+  broadcastQuestionsChanged(String(event.id));
+  return json({ question }, 201);
 }
 
-async function vote(request: Request, sql: Sql): Promise<Response> {
+async function vote(request: Request, env: WorkerEnv, sql: Sql): Promise<Response> {
   const body = await readJson(request);
-  const questionId = assertString(body.questionId, "questionId");
-  const voterId = safeVoterId(assertString(body.voterId, "voterId"));
+  const questionId = safeUuid(assertString(body.questionId, "questionId"));
   const value = Number(body.value);
 
+  if (!questionId) throw createError(404, "Question not found.");
   if (![-1, 0, 1].includes(value)) throw createError(400, "Invalid vote.");
 
+  const voter = await requireVoterToken(request, env);
+  const question = await repository.getVoteTarget(sql, questionId);
+  if (!question) throw createError(404, "Question not found.");
+  if (question.eventId !== voter.eventId) throw createError(403, "Vote is not allowed.");
+  if (!question.isPublished || question.isArchived || question.status === "hidden") {
+    throw createError(403, "Vote is not allowed.");
+  }
+  await enforceRateLimit(env.PUBLIC_VOTE_RATE_LIMIT, env, ["vote", question.eventId, voter.voterId]);
+
   if (value === 0) {
-    await sql`delete from question_votes where question_id = ${questionId} and voter_id = ${voterId}`;
+    await repository.deleteVote(sql, questionId, voter.voterId);
   } else {
-    await sql`
-      insert into question_votes (question_id, voter_id, value, updated_at)
-      values (${questionId}, ${voterId}, ${value}, now())
-      on conflict (question_id, voter_id)
-      do update set value = excluded.value, updated_at = now()
-    `;
+    await repository.upsertVote(sql, questionId, voter.voterId, value);
   }
 
+  broadcastQuestionsChanged(question.eventId);
   return json({ ok: true });
 }
 
-async function listTalks(sql: Sql, eventId: string) {
-  return sql`
-    select id::text, title, speakers, role, position
-    from event_talks
-    where event_id = ${eventId}
-    order by position asc, title asc
-  `;
-}
+async function verifyTurnstileIfConfigured(request: Request, env: WorkerEnv, token: unknown): Promise<void> {
+  if (!env.TURNSTILE_SECRET_KEY) return;
+  if (typeof token !== "string" || !token.trim()) throw createError(400, "Verification required.");
 
-async function assertOwnsEvent(sql: Sql, userId: string, eventId: string): Promise<void> {
-  const rows = await sql`
-    select id::text
-    from events
-    where id = ${eventId} and owner_id = ${userId}
-    limit 1
-  `;
-  if (!rows[0]) throw createError(404, "Event not found.");
+  const form = new FormData();
+  form.set("secret", env.TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  const ip = clientIp(request);
+  if (ip !== "unknown") form.set("remoteip", ip);
+
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) throw createError(400, "Verification failed.");
+
+  const result = (await response.json().catch(() => null)) as { success?: boolean } | null;
+  if (!result?.success) throw createError(400, "Verification failed.");
 }
 
 function parseEventPayload(body: Record<string, unknown>) {
@@ -645,116 +453,24 @@ function parseCreateTalks(value: unknown, language: string) {
   return talks.length ? talks : [{ title: fallbackTitle, speakers: "", role: "" }];
 }
 
-async function uniqueSlug(sql: Sql, base: string): Promise<string> {
-  const root = normalizeSlug(base) || "event";
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const slug = attempt === 0 ? root : `${root}-${crypto.randomUUID().slice(0, 8)}`;
-    const rows = await sql`select id from events where slug = ${slug} limit 1`;
-    if (!rows[0]) return slug;
-  }
-  return `${root}-${crypto.randomUUID().slice(0, 12)}`;
-}
-
-function slugFromTitle(value: string): string {
-  return normalizeSlug(value) || "event";
-}
-
-function normalizeSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
-
-function assertQuestionStatus(value: unknown): string {
-  if (value === "open" || value === "answered" || value === "hidden") return value;
-  throw createError(400, "Invalid question status.");
-}
-
-function safeUuid(value: string | null): string {
-  if (!value) return "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-    ? value
-    : "";
-}
-
-function safeVoterId(value: string | null): string {
-  if (!value) return "anonymous";
-  return value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "anonymous";
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function cleanText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function normalizeEmail(value: string): string {
-  const email = value.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw createError(400, "Invalid email.");
-  return email;
-}
-
-function profileName(metadata: Record<string, unknown>, email: string): string {
-  const value = metadata.full_name ?? metadata.name;
-  if (typeof value === "string" && value.trim()) return cleanText(value).slice(0, 120);
-  return email.split("@")[0] ?? email;
-}
-
-function profileAvatarUrl(metadata: Record<string, unknown>): string {
-  const value = metadata.avatar_url ?? metadata.picture;
-  return typeof value === "string" && isHttpUrl(value) ? value : "";
-}
-
-function assertString(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw createError(400, `Missing ${name}.`);
-  }
-  return value.trim();
-}
-
-async function readJson(request: Request): Promise<Record<string, unknown>> {
-  const data = await request.json().catch(() => null);
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw createError(400, "Invalid JSON.");
-  }
-  return data as Record<string, unknown>;
-}
-
-function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...jsonHeaders, ...headers },
-  });
-}
-
-function createError(status: number, message: string): ApiError {
-  return { status, message };
-}
-
-function normalizeError(error: unknown): ApiError {
-  if (isApiError(error)) return error;
-  console.error(JSON.stringify({ level: "error", message: String(error) }));
-  return { status: 500, message: "Internal server error." };
-}
-
-function isApiError(error: unknown): error is ApiError {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "status" in error &&
-      "message" in error &&
-      typeof (error as ApiError).status === "number" &&
-      typeof (error as ApiError).message === "string",
-  );
-}
+export const testInternals = {
+  assertQuestionStatus,
+  base64UrlDecode,
+  base64UrlEncode,
+  canonicalOriginResponse,
+  cleanText,
+  contentSecurityPolicy,
+  cookieValue,
+  createVoterToken,
+  normalizeQuestionBody,
+  normalizeSlug,
+  rateLimitKey,
+  safeUuid,
+  setSqlFactory(factory: typeof neon) {
+    sqlFactory = factory;
+  },
+  isUniqueViolation: repository.isUniqueViolation,
+  validateSupabaseClaims,
+  verifyVoterToken,
+  voterCookie,
+};

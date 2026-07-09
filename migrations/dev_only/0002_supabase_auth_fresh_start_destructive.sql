@@ -1,5 +1,8 @@
--- Fresh auth migration for Supabase Auth.
--- This intentionally removes existing local users and cascades their owned data.
+-- Development-only reset for switching a local database to Supabase Auth.
+--
+-- WARNING: This deletes every user. Because events.owner_id cascades, it also
+-- deletes owned events, talks, questions, and votes. Never run this on a
+-- production or shared database.
 delete from users;
 
 drop table if exists auth_sessions;
