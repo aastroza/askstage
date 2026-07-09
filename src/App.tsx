@@ -126,9 +126,12 @@ function AuthScreen() {
         <div className="auth-story">
           <BrandMark />
           <div className="auth-copy">
-            <p className="auth-kicker">For rooms that want better questions</p>
-            <h1 id="auth-title">Live Q&A, ready before the room fills.</h1>
-            <p>Create an event, share the QR, and let every attendee ask from the phone already in their hand.</p>
+            <p className="auth-kicker">Live Q&A for talks, panels, and classrooms</p>
+            <h1 id="auth-title">Every question in the room, on one screen.</h1>
+            <p>
+              Create your event, put the QR code on stage, and the audience asks and votes
+              from their phones. No apps, no accounts, no friction.
+            </p>
           </div>
           <div className="auth-actions">
             {error ? <Notice tone="error">{error}</Notice> : null}
@@ -136,7 +139,7 @@ function AuthScreen() {
               <span className="google-mark" aria-hidden="true">G</span>
               {loading ? "Redirecting..." : "Continue with Google"}
             </button>
-            <p>Organizer sign-in only. Attendees never need an account.</p>
+            <p className="auth-footnote">Sign-in is for organizers. Your audience never needs an account.</p>
           </div>
         </div>
 
@@ -145,18 +148,14 @@ function AuthScreen() {
             src="https://images.unsplash.com/photo-1505373877841-8d25f7d46678?auto=format&fit=crop&w=1600&q=80"
             alt="An audience gathered for a conference session in a bright event room."
           />
-          <figcaption>
-            <span aria-hidden="true" />
-            Questions are already coming in.
-          </figcaption>
           <div className="auth-phone-preview" aria-hidden="true">
             <div className="phone-topline">
-              <span>Live now</span>
+              <span><i className="live-dot" /> Live now</span>
               <strong>8 questions</strong>
             </div>
             <p>How do we keep the energy after the first question?</p>
             <div className="phone-vote-row">
-              <span>24 votes</span>
+              <span>▲ 24 votes</span>
               <span>Next up</span>
             </div>
           </div>
@@ -346,9 +345,22 @@ function CreateEventWizard({
           </button>
         </div>
         <nav className="wizard-steps" aria-label="Create event steps">
-          <span className={step === "basics" ? "active" : ""}>Basics</span>
-          <span className={step === "talks" ? "active" : ""}>Sessions</span>
-          <span className={step === "share" ? "active" : ""}>Share</span>
+          {(
+            [
+              ["basics", "Basics"],
+              ["talks", "Sessions"],
+              ["share", "Share"],
+            ] as Array<[typeof step, string]>
+          ).map(([key, label], index) => {
+            const order = ["basics", "talks", "share"];
+            const state = step === key ? "active" : order.indexOf(step) > index ? "done" : "";
+            return (
+              <span key={key} className={state} aria-current={step === key ? "step" : undefined}>
+                <i>{state === "done" ? <Icon name="check" /> : index + 1}</i>
+                {label}
+              </span>
+            );
+          })}
         </nav>
         {error ? <Notice tone="error">{error}</Notice> : null}
 
@@ -377,20 +389,39 @@ function CreateEventWizard({
             <div className="two-field-row">
               <label>
                 Date
-                <input value={payload.dateLabel} onChange={(input) => updatePayload("dateLabel", input.currentTarget.value)} placeholder="Thu, Aug 6" />
+                <span className="input-affix">
+                  <Icon name="calendar" />
+                  <input
+                    type="date"
+                    value={payload.dateLabel}
+                    onChange={(input) => updatePayload("dateLabel", input.currentTarget.value)}
+                  />
+                </span>
               </label>
               <label>
                 Location
-                <input value={payload.locationLabel} onChange={(input) => updatePayload("locationLabel", input.currentTarget.value)} placeholder="Main stage" />
+                <span className="input-affix">
+                  <Icon name="map-pin" />
+                  <input
+                    value={payload.locationLabel}
+                    onChange={(input) => updatePayload("locationLabel", input.currentTarget.value)}
+                    placeholder="Main stage, Building A"
+                    maxLength={80}
+                  />
+                </span>
               </label>
             </div>
-            <div className="segmented-field" role="radiogroup" aria-label="Event language">
-              <button className={payload.language === "en" ? "active" : ""} type="button" onClick={() => updatePayload("language", "en")}>
-                English
-              </button>
-              <button className={payload.language === "es" ? "active" : ""} type="button" onClick={() => updatePayload("language", "es")}>
-                Espanol
-              </button>
+            <div className="language-field">
+              <span className="field-title">Audience language</span>
+              <div className="segmented-field" role="radiogroup" aria-label="Event language">
+                <button className={payload.language === "en" ? "active" : ""} type="button" onClick={() => updatePayload("language", "en")}>
+                  English
+                </button>
+                <button className={payload.language === "es" ? "active" : ""} type="button" onClick={() => updatePayload("language", "es")}>
+                  Español
+                </button>
+              </div>
+              <span className="field-hint">Sets the language attendees see on the public page.</span>
             </div>
             <div className="wizard-actions">
               <button className="primary-button" type="submit">Continue</button>
@@ -602,7 +633,7 @@ function EventEditor({
         <div>
           <p className="overline">{event.isPublished ? "Published" : "Draft"}</p>
           <h1>{event.title}</h1>
-          <p>{[event.dateLabel, event.locationLabel].filter(Boolean).join(" / ") || "Ready for live Q&A"}</p>
+          <p>{[formatDateLabel(event.dateLabel, event.language), event.locationLabel].filter(Boolean).join(" · ") || "Ready for live Q&A"}</p>
         </div>
         <a className="secondary-button" href={publicUrl} target="_blank" rel="noreferrer">
           <Icon name="external" />
@@ -703,120 +734,174 @@ function EventEditor({
       ) : null}
 
       {activeTab === "settings" ? (
-        <section className="editor-main-card settings-view">
-          <div className="section-head">
-          <div>
-              <h2>Settings</h2>
-              <p>Defaults stay out of the creation flow. Tune details here only when you need them.</p>
-            </div>
-            <button className="primary-button" type="submit" form="event-settings-form">Save event</button>
+        <section className="settings-layout">
+          <div className="settings-column">
+            <form id="event-settings-form" className="settings-form" onSubmit={saveEvent}>
+              <section className="settings-card">
+                <header className="settings-card-head">
+                  <h2>Event details</h2>
+                  <p>The basics attendees see at the top of the public page.</p>
+                </header>
+                <label>
+                  Event title
+                  <input value={draft.title} onChange={(input) => updateDraft("title", input.currentTarget.value)} required />
+                </label>
+                <div className="two-field-row">
+                  <label>
+                    Date
+                    <span className="input-affix">
+                      <Icon name="calendar" />
+                      <input
+                        type="date"
+                        value={isIsoDate(draft.dateLabel) ? draft.dateLabel : ""}
+                        onChange={(input) => updateDraft("dateLabel", input.currentTarget.value)}
+                      />
+                    </span>
+                  </label>
+                  <label>
+                    Location
+                    <span className="input-affix">
+                      <Icon name="map-pin" />
+                      <input
+                        value={draft.locationLabel}
+                        onChange={(input) => updateDraft("locationLabel", input.currentTarget.value)}
+                        placeholder="Main stage, Building A"
+                        maxLength={80}
+                      />
+                    </span>
+                  </label>
+                </div>
+                <div className="language-field">
+                  <span className="field-title">Audience language</span>
+                  <div className="segmented-field" role="radiogroup" aria-label="Event language">
+                    <button className={draft.language === "en" ? "active" : ""} type="button" onClick={() => updateDraft("language", "en")}>
+                      English
+                    </button>
+                    <button className={draft.language === "es" ? "active" : ""} type="button" onClick={() => updateDraft("language", "es")}>
+                      Español
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="settings-card">
+                <header className="settings-card-head">
+                  <h2>Public page</h2>
+                  <p>Make the page feel like your event. Watch it change in the preview.</p>
+                </header>
+                <label>
+                  Accent color
+                  <span className="color-field">
+                    <input type="color" value={draft.accentColor} onChange={(input) => updateDraft("accentColor", input.currentTarget.value)} />
+                    <input value={draft.accentColor} onChange={(input) => updateDraft("accentColor", input.currentTarget.value)} />
+                  </span>
+                </label>
+                <label>
+                  Welcome message
+                  <textarea rows={3} value={draft.introText} onChange={(input) => updateDraft("introText", input.currentTarget.value)} placeholder="Shown above the ask button." />
+                </label>
+                <div className="two-field-row">
+                  <label>
+                    Ask button label
+                    <input value={draft.askButtonLabel} onChange={(input) => updateDraft("askButtonLabel", input.currentTarget.value)} placeholder="Ask a question" />
+                  </label>
+                  <label>
+                    Footer label
+                    <input value={draft.footerLabel} onChange={(input) => updateDraft("footerLabel", input.currentTarget.value)} />
+                  </label>
+                </div>
+                <label>
+                  Footer URL
+                  <input type="url" value={draft.footerUrl} onChange={(input) => updateDraft("footerUrl", input.currentTarget.value)} placeholder="https://" />
+                </label>
+              </section>
+
+              <section className="settings-card">
+                <header className="settings-card-head">
+                  <h2>Advanced</h2>
+                  <p>Visibility and the public address of this event.</p>
+                </header>
+                <label>
+                  Public link
+                  <span className="slug-field">
+                    <span className="slug-prefix">{window.location.host}/e/</span>
+                    <input value={draft.slug} onChange={(input) => updateDraft("slug", input.currentTarget.value)} required />
+                  </span>
+                </label>
+                <label className="toggle-row">
+                  <span>
+                    <strong>Published</strong>
+                    <small>Attendees can open the public page and ask questions.</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="switch"
+                    checked={draft.isPublished}
+                    onChange={(input) => updateDraft("isPublished", input.currentTarget.checked)}
+                  />
+                </label>
+                <label className="toggle-row">
+                  <span>
+                    <strong>Archived</strong>
+                    <small>Keep the event but tuck it away once it is over.</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="switch"
+                    checked={draft.isArchived}
+                    onChange={(input) => updateDraft("isArchived", input.currentTarget.checked)}
+                  />
+                </label>
+              </section>
+
+              <div className="settings-save-bar">
+                <button className="primary-button" type="submit">Save changes</button>
+              </div>
+            </form>
+
+            <section className="settings-card talk-editor">
+              <header className="settings-card-head with-action">
+                <div>
+                  <h2>Sessions</h2>
+                  <p>Group speakers who share the same talk. Attendees pick one when they ask.</p>
+                </div>
+                <button className="secondary-button" type="button" onClick={() => setTalks((current) => [...current, newTalk(current.length)])}>
+                  <Icon name="plus" />
+                  Add session
+                </button>
+              </header>
+              <div className="talk-list-editor">
+                {talks.map((talk, index) => (
+                  <article className="talk-edit-row" key={talk.id}>
+                    <span className="row-number">{index + 1}</span>
+                    <label>
+                      Title
+                      <input value={talk.title} onChange={(input) => updateTalk(talks, setTalks, talk.id, { title: input.currentTarget.value })} />
+                    </label>
+                    <label>
+                      Speakers
+                      <input value={talk.speakers} onChange={(input) => updateTalk(talks, setTalks, talk.id, { speakers: input.currentTarget.value })} />
+                    </label>
+                    <label>
+                      Subtitle
+                      <input value={talk.role} onChange={(input) => updateTalk(talks, setTalks, talk.id, { role: input.currentTarget.value })} />
+                    </label>
+                    <button className="icon-button danger" type="button" aria-label="Remove talk" onClick={() => setTalks((current) => current.filter((item) => item.id !== talk.id))}>
+                      <Icon name="trash" />
+                    </button>
+                  </article>
+                ))}
+              </div>
+              <div className="settings-save-bar">
+                <button className="primary-button" type="button" onClick={saveTalks}>Save sessions</button>
+              </div>
+            </section>
           </div>
 
-          <form id="event-settings-form" className="settings-grid" onSubmit={saveEvent}>
-            <h3>Basic information</h3>
-          <label className="wide-field">
-            Event title
-            <input value={draft.title} onChange={(input) => updateDraft("title", input.currentTarget.value)} required />
-          </label>
-          <label>
-            Language
-            <select value={draft.language} onChange={(input) => updateDraft("language", input.currentTarget.value as Language)}>
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-            </select>
-          </label>
-          <label>
-            Date label
-            <input value={draft.dateLabel} onChange={(input) => updateDraft("dateLabel", input.currentTarget.value)} />
-          </label>
-          <label>
-            Location label
-            <input value={draft.locationLabel} onChange={(input) => updateDraft("locationLabel", input.currentTarget.value)} />
-          </label>
-            <h3>Appearance and copy</h3>
-          <label>
-            Accent color
-            <span className="color-field">
-              <input type="color" value={draft.accentColor} onChange={(input) => updateDraft("accentColor", input.currentTarget.value)} />
-              <input value={draft.accentColor} onChange={(input) => updateDraft("accentColor", input.currentTarget.value)} />
-            </span>
-          </label>
-          <label className="wide-field">
-            Intro text
-            <textarea rows={3} value={draft.introText} onChange={(input) => updateDraft("introText", input.currentTarget.value)} />
-          </label>
-          <label>
-            Ask button label
-            <input value={draft.askButtonLabel} onChange={(input) => updateDraft("askButtonLabel", input.currentTarget.value)} />
-          </label>
-          <label>
-            Footer label
-            <input value={draft.footerLabel} onChange={(input) => updateDraft("footerLabel", input.currentTarget.value)} />
-          </label>
-          <label className="wide-field">
-            Footer URL
-            <input type="url" value={draft.footerUrl} onChange={(input) => updateDraft("footerUrl", input.currentTarget.value)} />
-          </label>
-            <h3>Advanced</h3>
-            <label>
-              Public slug
-              <input value={draft.slug} onChange={(input) => updateDraft("slug", input.currentTarget.value)} required />
-            </label>
-            <label>
-              Published
-              <select value={draft.isPublished ? "yes" : "no"} onChange={(input) => updateDraft("isPublished", input.currentTarget.value === "yes")}>
-                <option value="yes">Published</option>
-                <option value="no">Draft</option>
-              </select>
-            </label>
-            <label>
-              Archive
-              <select value={draft.isArchived ? "yes" : "no"} onChange={(input) => updateDraft("isArchived", input.currentTarget.value === "yes")}>
-                <option value="no">Active</option>
-                <option value="yes">Archived</option>
-              </select>
-            </label>
-          <div className="form-actions">
-            <button className="primary-button" type="submit">Save event</button>
-          </div>
-        </form>
-
-          <div className="talk-editor">
-        <div className="section-head compact">
-          <div>
-                <h3>Sessions</h3>
-            <p>Group speakers who share the same talk. The title is shown when attendees ask a question.</p>
-          </div>
-          <button className="secondary-button" type="button" onClick={() => setTalks((current) => [...current, newTalk(current.length)])}>
-            <Icon name="plus" />
-            Add talk
-          </button>
-        </div>
-        <div className="talk-list-editor">
-          {talks.map((talk, index) => (
-            <article className="talk-edit-row" key={talk.id}>
-              <span className="row-number">{index + 1}</span>
-              <label>
-                Title
-                <input value={talk.title} onChange={(input) => updateTalk(talks, setTalks, talk.id, { title: input.currentTarget.value })} />
-              </label>
-              <label>
-                Speakers
-                <input value={talk.speakers} onChange={(input) => updateTalk(talks, setTalks, talk.id, { speakers: input.currentTarget.value })} />
-              </label>
-              <label>
-                Subtitle
-                <input value={talk.role} onChange={(input) => updateTalk(talks, setTalks, talk.id, { role: input.currentTarget.value })} />
-              </label>
-              <button className="icon-button danger" type="button" aria-label="Remove talk" onClick={() => setTalks((current) => current.filter((item) => item.id !== talk.id))}>
-                <Icon name="trash" />
-              </button>
-            </article>
-          ))}
-        </div>
-        <button className="primary-button" type="button" onClick={saveTalks}>Save talks</button>
-        </div>
-      </section>
+          <PhonePreview draft={draft} talks={talks} />
+        </section>
       ) : null}
     </div>
   );
@@ -937,7 +1022,7 @@ function PublicEventPage({ slug }: { slug: string }) {
   const askLabel = event.askButtonLabel || strings.askQuestion;
   const footerLabel = event.footerLabel || strings.defaultFooter;
   const footerUrl = event.footerUrl || "https://askstage.com";
-  const eventMeta = [event.dateLabel, event.locationLabel].filter(Boolean).join(" / ");
+  const eventMeta = [formatDateLabel(event.dateLabel, event.language), event.locationLabel].filter(Boolean).join(" · ");
 
   return (
     <main className="public-shell" style={accentStyle}>
@@ -1177,6 +1262,64 @@ function QRShareCard({ title, publicUrl, large = false }: { title: string; publi
   );
 }
 
+function PhonePreview({ draft, talks }: { draft: OwnerEventPayload; talks: Talk[] }) {
+  const strings = eventCopy(draft.language);
+  const intro = draft.introText || strings.defaultIntro;
+  const askLabel = draft.askButtonLabel || strings.askQuestion;
+  const footerLabel = draft.footerLabel || strings.defaultFooter;
+  const meta = [formatDateLabel(draft.dateLabel, draft.language), draft.locationLabel].filter(Boolean).join(" · ");
+  const accentStyle = { "--event-accent": draft.accentColor || defaultAccent } as React.CSSProperties;
+  const sampleQuestions =
+    draft.language === "es"
+      ? [
+          { body: "¿Qué consejo le darían a alguien que recién comienza?", score: 18 },
+          { body: "¿Cómo midieron el impacto del proyecto?", score: 11 },
+        ]
+      : [
+          { body: "What advice would you give someone just starting out?", score: 18 },
+          { body: "How did you measure the impact of the project?", score: 11 },
+        ];
+  const talkTitle = talks[0]?.title ?? "";
+
+  return (
+    <aside className="phone-preview-panel" aria-label="Attendee page preview">
+      <p className="preview-caption">
+        <i className="live-dot" />
+        Live preview · what attendees see
+      </p>
+      <div className="phone-frame" style={accentStyle}>
+        <div className="phone-screen">
+          <div className="preview-topbar">
+            <span className="preview-brand">?</span>
+            <span className="preview-title-block">
+              <strong>{draft.title || "Your event"}</strong>
+              {meta ? <small>{meta}</small> : null}
+            </span>
+          </div>
+          <p className="preview-intro">{intro}</p>
+          <button className="preview-ask" type="button" tabIndex={-1}>
+            + {askLabel}
+          </button>
+          <div className="preview-questions">
+            {sampleQuestions.map((question) => (
+              <article key={question.body} className="preview-question">
+                <span className="preview-votes">
+                  ▲<strong>{question.score}</strong>
+                </span>
+                <span className="preview-question-body">
+                  {talkTitle ? <small>{talkTitle}</small> : null}
+                  <p>{question.body}</p>
+                </span>
+              </article>
+            ))}
+          </div>
+          <div className="preview-footer">{footerLabel}</div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function PageShell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <main className={`page-shell ${className}`}>{children}</main>;
 }
@@ -1194,9 +1337,11 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Icon({ name }: { name: "plus" | "send" | "x" | "chevron-up" | "chevron-down" | "moon" | "sun" | "trash" | "external" | "refresh" | "pin" | "check" | "eye-off" | "copy" | "download" }) {
+function Icon({ name }: { name: "plus" | "send" | "x" | "chevron-up" | "chevron-down" | "moon" | "sun" | "trash" | "external" | "refresh" | "pin" | "check" | "eye-off" | "copy" | "download" | "calendar" | "map-pin" }) {
   const paths = {
     plus: <path d="M12 5v14M5 12h14" />,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 11h18" /></>,
+    "map-pin": <><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
     send: <><path d="m4 12 16-8-5 16-3-7-8-1Z" /><path d="m12 13 8-9" /></>,
     x: <path d="M18 6 6 18M6 6l12 12" />,
     "chevron-up": <path d="m7 15 5-5 5 5" />,
@@ -1295,6 +1440,22 @@ function slugifyFileName(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48) || "event";
+}
+
+function isIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function formatDateLabel(value: string, language: Language) {
+  if (!isIsoDate(value)) return value;
+  const date = new Date(`${value}T12:00:00`);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return new Intl.DateTimeFormat(language === "es" ? "es-CL" : "en-US", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+  }).format(date);
 }
 
 function formatTime(value: string, language: Language) {
