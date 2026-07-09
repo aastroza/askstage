@@ -51,12 +51,13 @@ Use these redirect URLs in Supabase and Google OAuth:
 
 ```text
 http://localhost:8787/app
-https://preguntaya.alonsoastroza.workers.dev/app
-https://<your-custom-domain>/app
+https://askstage.com/app
+https://www.askstage.com/app
 ```
 
-For production, keep only the final public origin in the OAuth allowlists once a
-custom domain is mapped.
+`https://askstage.com` is the canonical production origin. Keep
+`https://www.askstage.com/app` in the OAuth allowlists only if you also allow
+users to start login from the `www` hostname.
 
 ### 3. Install dependencies
 
@@ -89,14 +90,11 @@ validate them during deploy.
 
 `PUBLIC_ORIGIN` is the canonical production origin. When it is set, API requests
 from other hosts return 404 and browser navigations are redirected to the
-canonical origin. Update it to your custom domain when you stop using
-`workers.dev`.
+canonical origin.
 
-Preview deploy URLs are disabled in `wrangler.jsonc`. `workers_dev` is still
-enabled because the checked-in production origin is currently the Workers
-subdomain. After mapping a custom domain or route, set `PUBLIC_ORIGIN` to that
-domain, set `workers_dev` to `false`, deploy, and remove the Workers subdomain
-from Supabase and Google OAuth redirect allowlists.
+Preview deploy URLs and the Workers subdomain are disabled in `wrangler.jsonc`.
+Production is served through the configured custom domains `askstage.com` and
+`www.askstage.com`, with `askstage.com` as the canonical origin.
 
 Public and organizer question lists use Server-Sent Events for quick refreshes,
 with 12-second polling retained as a fallback.
@@ -145,4 +143,6 @@ npx wrangler secret put VOTER_TOKEN_SECRET
 npm run deploy
 ```
 
-Then map your custom domain in Cloudflare.
+`PUBLIC_ORIGIN` and `ENVIRONMENT` are non-secret vars committed in
+`wrangler.jsonc`. Turnstile is optional; if enabled, configure
+`PUBLIC_TURNSTILE_SITE_KEY` as a var and `TURNSTILE_SECRET_KEY` as a secret.

@@ -67,7 +67,7 @@ describe("dependency maintenance", () => {
 });
 
 describe("production exposure", () => {
-  it("keeps preview URLs disabled and constrains workers.dev exposure", () => {
+  it("serves production from the canonical custom domain only", () => {
     const wrangler = readJson<{
       workers_dev?: boolean;
       preview_urls?: boolean;
@@ -76,14 +76,15 @@ describe("production exposure", () => {
     }>("wrangler.jsonc");
     const readme = read("readme.md");
     const publicOrigin = wrangler.vars?.PUBLIC_ORIGIN ?? "";
-    const productionUsesWorkersDev = publicOrigin.endsWith(".workers.dev");
 
     expect(wrangler.preview_urls).toBe(false);
-    expect(wrangler.workers_dev).toBe(productionUsesWorkersDev);
+    expect(wrangler.workers_dev).toBe(false);
+    expect(publicOrigin).toBe("https://askstage.com");
     expect(wrangler.secrets?.required).toEqual(
       expect.arrayContaining(["DATABASE_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY", "VOTER_TOKEN_SECRET"]),
     );
-    expect(readme).toContain("set `workers_dev` to `false`");
-    expect(readme).toContain("remove the workers subdomain");
+    expect(readme).toContain("https://askstage.com/app");
+    expect(readme).toContain("https://www.askstage.com/app");
+    expect(readme).toContain("workers subdomain are disabled");
   });
 });
