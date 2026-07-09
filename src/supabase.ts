@@ -7,7 +7,6 @@ type AuthConfig = {
 
 let configPromise: Promise<AuthConfig> | null = null;
 let clientPromise: Promise<SupabaseClient> | null = null;
-const lastOrganizerEmailKey = "askstage-last-organizer-email";
 
 async function loadAuthConfig(): Promise<AuthConfig> {
   if (!configPromise) {
@@ -47,12 +46,10 @@ export async function getAccessToken(): Promise<string | null> {
 
 export async function signInWithGoogle(): Promise<void> {
   const supabase = await getSupabaseClient();
-  const loginHint = localStorage.getItem(lastOrganizerEmailKey)?.trim();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: `${window.location.origin}/app`,
-      ...(loginHint ? { queryParams: { login_hint: loginHint } } : {}),
     },
   });
   if (error) throw error;

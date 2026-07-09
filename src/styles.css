@@ -145,44 +145,38 @@ p {
   border-radius: 13px;
 }
 
-.github-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  color: color-mix(in srgb, var(--text) 76%, var(--muted));
-  text-decoration: none;
-  box-shadow: 0 8px 20px rgba(54, 42, 28, 0.06);
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
-}
-
-.github-link:hover {
-  border-color: color-mix(in srgb, var(--text) 28%, var(--border-strong));
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: 0 10px 24px rgba(54, 42, 28, 0.1);
-  transform: translateY(-1px);
-}
-
-.github-logo {
-  width: 18px;
-  height: 18px;
-  fill: currentColor;
-  stroke: none;
-}
-
 /* ---------------------------------- Auth ----------------------------------- */
 
 .auth-shell {
+  position: relative;
+  overflow: hidden;
   align-items: center;
   padding: clamp(18px, 3vw, 40px);
   background:
     radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 26rem),
     linear-gradient(160deg, #fffdf9 0%, #f5f0e7 55%, #eaf3fd 100%);
+}
+
+.github-ribbon {
+  position: absolute;
+  top: 30px;
+  right: -50px;
+  z-index: 3;
+  width: 220px;
+  padding: 8px 0;
+  background: #17130f;
+  color: #fffdf9;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  text-decoration: none;
+  transform: rotate(45deg);
+  box-shadow: 0 8px 18px rgba(23, 19, 15, 0.18);
+}
+
+.github-ribbon:hover {
+  background: #0f8bff;
 }
 
 .auth-landing {
@@ -204,14 +198,6 @@ p {
   justify-items: start;
   gap: clamp(28px, 5vh, 48px);
   padding: clamp(8px, 2vw, 24px) 0;
-}
-
-.auth-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  width: min(100%, 360px);
 }
 
 .auth-story .brand-mark span {
@@ -770,7 +756,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   position: sticky;
   top: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: 100vh;
   padding: 20px;
   border-right: 1px solid var(--border);
@@ -778,7 +764,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .sidebar-top,
-.sidebar-actions,
 .section-head,
 .account-row,
 .public-topbar,
@@ -787,10 +772,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-}
-
-.sidebar-actions {
-  gap: 8px;
 }
 
 .event-nav {
@@ -845,6 +826,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .account-row {
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+.sidebar-social-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-social-links a {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: color-mix(in srgb, var(--muted) 84%, var(--text));
+  text-decoration: none;
+  transition: color 150ms ease, transform 150ms ease;
+}
+
+.sidebar-social-links a:hover {
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.sidebar-social-links svg {
+  width: 17px;
+  height: 17px;
+}
+
+.sidebar-social-links .github-logo {
+  fill: currentColor;
+  stroke: none;
 }
 
 .account-avatar {
@@ -2152,6 +2167,10 @@ mark {
   }
 
   .account-row {
+    display: none;
+  }
+
+  .sidebar-social-links {
     display: none;
   }
 

@@ -47,8 +47,9 @@ type OwnerTab = "questions" | "share" | "settings";
 type OwnerQuestionFilter = QuestionStatus | "all";
 
 const defaultAccent = "#0f8bff";
-const lastOrganizerEmailKey = "askstage-last-organizer-email";
 const repositoryUrl = "https://github.com/aastroza/askstage";
+const contactEmail = "alonsoastroza@gmail.com";
+const twitterUrl = "https://x.com/aastroza";
 
 export default function App() {
   const [route, setRoute] = useRoute();
@@ -124,12 +125,12 @@ function AuthScreen() {
 
   return (
     <PageShell className="auth-shell">
+      <a className="github-ribbon" href={repositoryUrl} target="_blank" rel="noreferrer">
+        Fork me on GitHub
+      </a>
       <section className="auth-landing" aria-labelledby="auth-title">
         <div className="auth-story">
-          <div className="auth-topline">
-            <BrandMark />
-            <GitHubLink />
-          </div>
+          <BrandMark />
           <div className="auth-copy">
             <h1 id="auth-title">Every question in the room, on one screen.</h1>
             <p>
@@ -185,10 +186,6 @@ function OwnerApp({
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem(lastOrganizerEmailKey, user.email);
-  }, [user.email]);
-
   async function loadEvents() {
     setLoading(true);
     setError(null);
@@ -225,12 +222,9 @@ function OwnerApp({
       <aside className="owner-sidebar">
         <div className="sidebar-top">
           <BrandMark />
-          <div className="sidebar-actions">
-            <GitHubLink />
-            <button className="icon-button" type="button" aria-label="Create event" onClick={() => setWizardOpen(true)}>
-              <Icon name="plus" />
-            </button>
-          </div>
+          <button className="icon-button" type="button" aria-label="Create event" onClick={() => setWizardOpen(true)}>
+            <Icon name="plus" />
+          </button>
         </div>
         <nav className="event-nav" aria-label="Events">
           {events.map((event) => (
@@ -245,6 +239,7 @@ function OwnerApp({
             </button>
           ))}
         </nav>
+        <SocialLinks />
         <div className="account-row">
           <span className="account-avatar" aria-hidden="true">
             {user.avatarUrl ? <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" /> : initialsForUser(user)}
@@ -1382,11 +1377,21 @@ function GoogleLogo() {
   );
 }
 
-function GitHubLink() {
+function SocialLinks() {
+  const links = [
+    { href: repositoryUrl, label: "GitHub repository", icon: <GitHubIcon /> },
+    { href: `mailto:${contactEmail}`, label: "Email Alonso", icon: <MailIcon /> },
+    { href: twitterUrl, label: "Alonso on X", icon: <XIcon /> },
+  ];
+
   return (
-    <a className="github-link" href={repositoryUrl} target="_blank" rel="noreferrer" aria-label="Open AskStage on GitHub" title="GitHub">
-      <GitHubIcon />
-    </a>
+    <nav className="sidebar-social-links" aria-label="Project links">
+      {links.map((link) => (
+        <a key={link.href} href={link.href} target={link.href.startsWith("mailto:") ? undefined : "_blank"} rel={link.href.startsWith("mailto:") ? undefined : "noreferrer"} aria-label={link.label} title={link.label}>
+          {link.icon}
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -1394,6 +1399,23 @@ function GitHubIcon() {
   return (
     <svg className="github-logo" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.11.79-.25.79-.56v-2.16c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.04 1.77 2.72 1.26 3.38.96.11-.75.41-1.26.74-1.55-2.57-.29-5.27-1.28-5.27-5.72 0-1.26.45-2.3 1.2-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.18 1.19A11.08 11.08 0 0 1 12 5.91c.98 0 1.96.13 2.88.39 2.2-1.5 3.18-1.19 3.18-1.19.63 1.6.23 2.78.11 3.07.75.81 1.2 1.85 1.2 3.11 0 4.45-2.7 5.43-5.28 5.72.42.36.79 1.07.79 2.16v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5Z" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6h16v12H4z" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 4l16 16M20 4 4 20" />
     </svg>
   );
 }
@@ -1411,7 +1433,7 @@ function Icon({ name }: { name: "plus" | "send" | "x" | "chevron-up" | "chevron-
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></>,
     trash: <><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></>,
     external: <><path d="M14 3h7v7" /><path d="M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></>,
-    refresh: <><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M3 12A9 9 0 0 1 18.3 5.6" /><path d="M3 17v-5h5" /><path d="M21 7v5h-5" /></>,
+    refresh: <><path d="M20 12a8 8 0 1 1-2.35-5.65" /><path d="M20 4v6h-6" /></>,
     pin: <><path d="M12 17v5" /><path d="m5 9 10-6 6 6-6 10-4-4-4 4-2-2 4-4-4-4Z" /></>,
     check: <path d="m20 6-11 11-5-5" />,
     "eye-off": <><path d="M3 3l18 18" /><path d="M10.6 10.6A2 2 0 0 0 13.4 13.4" /><path d="M9.9 4.2A10.8 10.8 0 0 1 12 4c5 0 9 4.5 10 8a12.8 12.8 0 0 1-2.1 3.7" /><path d="M6.6 6.6C4.8 7.8 3.3 9.7 2 12c1 3.5 5 8 10 8 1.4 0 2.8-.4 4-1" /></>,
