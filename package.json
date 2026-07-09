@@ -2,6 +2,7 @@
   "name": "askstage",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 8787 --local",
