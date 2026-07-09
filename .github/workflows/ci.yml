@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,9 +21,8 @@ jobs:
       - run: npm run build
       - run: npm run check
       - name: Run Postgres integration tests
-        if: ${{ secrets.TEST_DATABASE_URL != '' }}
+        if: ${{ env.TEST_DATABASE_URL != '' }}
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
-          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
         run: npm run db:migrate:http && npm run test:db
       - run: npm audit --audit-level=high

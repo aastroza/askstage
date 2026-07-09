@@ -249,6 +249,24 @@ p {
   line-height: 1.5;
 }
 
+.auth-credit {
+  margin-top: clamp(6px, 2vh, 18px);
+  color: color-mix(in srgb, var(--muted) 84%, var(--text));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-credit a {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.auth-credit a:hover {
+  color: var(--text);
+}
+
 .auth-visual {
   position: relative;
   overflow: hidden;
