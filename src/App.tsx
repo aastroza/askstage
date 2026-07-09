@@ -47,6 +47,7 @@ type OwnerTab = "questions" | "share" | "settings";
 type OwnerQuestionFilter = QuestionStatus | "all";
 
 const defaultAccent = "#0f8bff";
+const lastOrganizerEmailKey = "askstage-last-organizer-email";
 
 export default function App() {
   const [route, setRoute] = useRoute();
@@ -179,6 +180,10 @@ function OwnerApp({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(lastOrganizerEmailKey, user.email);
+  }, [user.email]);
 
   async function loadEvents() {
     setLoading(true);
@@ -530,6 +535,7 @@ function EventEditor({
   const [selectedTalk, setSelectedTalk] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [slugError, setSlugError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const publicUrl = event ? `${window.location.origin}/e/${event.slug}` : "";
   const eventSummary = events.find((item) => item.id === eventId);
@@ -537,6 +543,7 @@ function EventEditor({
   async function loadEvent() {
     setLoading(true);
     setError(null);
+    setSlugError(null);
     setNotice(null);
     try {
       const data = await api<EventDetailResponse>(`/api/owner/events/${eventId}`);
@@ -574,6 +581,7 @@ function EventEditor({
     if (!draft) return;
     setNotice(null);
     setError(null);
+    setSlugError(null);
 
     try {
       const data = await api<{ event: EventDetail }>(`/api/owner/events/${eventId}`, {
@@ -590,7 +598,12 @@ function EventEditor({
       onEventSaved(data.event);
       setNotice("Changes saved.");
     } catch (saveError) {
-      setError(getErrorMessage(saveError));
+      const message = getErrorMessage(saveError);
+      if (message.toLowerCase().includes("slug")) {
+        setSlugError(message);
+      } else {
+        setError(message);
+      }
     }
   }
 
@@ -612,6 +625,7 @@ function EventEditor({
   }
 
   const updateDraft = <K extends keyof OwnerEventPayload>(key: K, value: OwnerEventPayload[K]) => {
+    if (key === "slug") setSlugError(null);
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   };
 
@@ -853,11 +867,11 @@ function EventEditor({
                 </header>
                 <label>
                   Public link
-                  <span className="slug-field">
+                  <span className={`slug-field ${slugError ? "invalid" : ""}`}>
                     <span className="slug-prefix">{window.location.host}/e/</span>
                     <input value={draft.slug} onChange={(input) => updateDraft("slug", input.currentTarget.value)} required />
                   </span>
-                  <span className="field-hint">Each public link is reserved globally. Save will stop you if another event already uses it.</span>
+                  {slugError ? <span className="field-error">{slugError}</span> : null}
                 </label>
                 <label className="toggle-row">
                   <span>

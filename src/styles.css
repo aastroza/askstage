@@ -493,6 +493,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-radius: 0 var(--radius-input) var(--radius-input) 0;
 }
 
+.slug-field.invalid .slug-prefix,
+.slug-field.invalid input {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border-strong));
+}
+
+.slug-field.invalid input:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
