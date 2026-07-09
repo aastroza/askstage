@@ -39,7 +39,7 @@ describe("database migrations", () => {
   it("uses the safe migration runner for root migrations only", () => {
     const runner = read("scripts/migrate-safe.mjs");
     const httpRunner = read("scripts/migrate-http.mjs");
-    const readme = read("readme.md");
+    const readme = read("README.md");
 
     expect(runner).toContain("readdirsync(migrationdir, { withfiletypes: true })");
     expect(runner).toContain("entry.isfile()");
@@ -71,7 +71,7 @@ describe("production exposure", () => {
       vars?: { PUBLIC_ORIGIN?: string };
       secrets?: { required?: string[] };
     }>("wrangler.jsonc");
-    const readme = read("readme.md");
+    const readme = read("README.md");
     const publicOrigin = wrangler.vars?.PUBLIC_ORIGIN ?? "";
 
     expect(wrangler.preview_urls).toBe(false);

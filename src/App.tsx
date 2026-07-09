@@ -167,7 +167,7 @@ function AuthScreen() {
             <p className="auth-footnote">Sign-in is for organizers. Your audience never needs an account.</p>
           </div>
           <p className="auth-credit">
-            Construido con <span aria-label="amor" role="img">❤️</span> desde{" "}
+            Built with <span aria-label="love" role="img">❤️</span> by{" "}
             <a href="https://iadevs.cl" target="_blank" rel="noreferrer">
               iadevs
             </a>
