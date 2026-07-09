@@ -834,7 +834,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   justify-content: center;
   gap: 18px;
   padding: 12px 0 14px;
-  border-top: 1px solid var(--border);
 }
 
 .sidebar-social-links a {
@@ -858,6 +857,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .sidebar-social-links .github-logo {
+  fill: currentColor;
+  stroke: none;
+}
+
+.sidebar-social-links .x-logo {
   fill: currentColor;
   stroke: none;
 }
