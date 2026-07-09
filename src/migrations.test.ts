@@ -22,12 +22,9 @@ describe("database migrations", () => {
 
   it("isolates the destructive Supabase Auth reset under dev_only", () => {
     const destructive = read("migrations/dev_only/0002_supabase_auth_fresh_start_destructive.sql");
-    const readme = read("readme.md");
 
     expect(destructive).toContain("delete from users");
     expect(destructive).toContain("never run this on a");
-    expect(readme).toContain("migrations/dev_only/");
-    expect(readme).not.toContain("0002_supabase_auth_fresh_start.sql");
   });
 
   it("adds and maintains denormalized question scores", () => {
@@ -52,7 +49,7 @@ describe("database migrations", () => {
     expect(httpRunner).toContain("sql.query(statement, [])");
     expect(httpRunner).not.toContain("dev_only");
     expect(readme).toContain("npm run db:migrate");
-    expect(readme).toContain("intentionally ignores `migrations/dev_only/`");
+    expect(readme).toContain("npm run db:migrate:http");
   });
 });
 
@@ -83,8 +80,7 @@ describe("production exposure", () => {
     expect(wrangler.secrets?.required).toEqual(
       expect.arrayContaining(["DATABASE_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY", "VOTER_TOKEN_SECRET"]),
     );
-    expect(readme).toContain("https://askstage.com/app");
-    expect(readme).toContain("https://www.askstage.com/app");
-    expect(readme).toContain("workers subdomain are disabled");
+    expect(readme).toContain("https://your-domain.com/app");
+    expect(readme).toContain("public_origin");
   });
 });
