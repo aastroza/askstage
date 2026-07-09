@@ -48,6 +48,7 @@ type OwnerQuestionFilter = QuestionStatus | "all";
 
 const defaultAccent = "#0f8bff";
 const lastOrganizerEmailKey = "askstage-last-organizer-email";
+const repositoryUrl = "https://github.com/aastroza/askstage";
 
 export default function App() {
   const [route, setRoute] = useRoute();
@@ -125,7 +126,10 @@ function AuthScreen() {
     <PageShell className="auth-shell">
       <section className="auth-landing" aria-labelledby="auth-title">
         <div className="auth-story">
-          <BrandMark />
+          <div className="auth-topline">
+            <BrandMark />
+            <GitHubLink />
+          </div>
           <div className="auth-copy">
             <h1 id="auth-title">Every question in the room, on one screen.</h1>
             <p>
@@ -221,9 +225,12 @@ function OwnerApp({
       <aside className="owner-sidebar">
         <div className="sidebar-top">
           <BrandMark />
-          <button className="icon-button" type="button" aria-label="Create event" onClick={() => setWizardOpen(true)}>
-            <Icon name="plus" />
-          </button>
+          <div className="sidebar-actions">
+            <GitHubLink />
+            <button className="icon-button" type="button" aria-label="Create event" onClick={() => setWizardOpen(true)}>
+              <Icon name="plus" />
+            </button>
+          </div>
         </div>
         <nav className="event-nav" aria-label="Events">
           {events.map((event) => (
@@ -1371,6 +1378,22 @@ function GoogleLogo() {
       <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.35 0-4.34-1.58-5.05-3.72H.94v2.33A9 9 0 0 0 9 18Z" />
       <path fill="#FBBC05" d="M3.95 10.7A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.16.28-1.7V4.97H.94A9 9 0 0 0 0 9c0 1.45.34 2.82.94 4.03l3.01-2.33Z" />
       <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .94 4.97L3.95 7.3C4.66 5.16 6.65 3.58 9 3.58Z" />
+    </svg>
+  );
+}
+
+function GitHubLink() {
+  return (
+    <a className="github-link" href={repositoryUrl} target="_blank" rel="noreferrer" aria-label="Open AskStage on GitHub" title="GitHub">
+      <GitHubIcon />
+    </a>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg className="github-logo" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.11.79-.25.79-.56v-2.16c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.04 1.77 2.72 1.26 3.38.96.11-.75.41-1.26.74-1.55-2.57-.29-5.27-1.28-5.27-5.72 0-1.26.45-2.3 1.2-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.18 1.19A11.08 11.08 0 0 1 12 5.91c.98 0 1.96.13 2.88.39 2.2-1.5 3.18-1.19 3.18-1.19.63 1.6.23 2.78.11 3.07.75.81 1.2 1.85 1.2 3.11 0 4.45-2.7 5.43-5.28 5.72.42.36.79 1.07.79 2.16v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5Z" />
     </svg>
   );
 }

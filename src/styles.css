@@ -145,6 +145,36 @@ p {
   border-radius: 13px;
 }
 
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  text-decoration: none;
+  box-shadow: 0 8px 20px rgba(54, 42, 28, 0.06);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.github-link:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--border-strong));
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 10px 24px rgba(54, 42, 28, 0.1);
+  transform: translateY(-1px);
+}
+
+.github-logo {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
+}
+
 /* ---------------------------------- Auth ----------------------------------- */
 
 .auth-shell {
@@ -174,6 +204,14 @@ p {
   justify-items: start;
   gap: clamp(28px, 5vh, 48px);
   padding: clamp(8px, 2vw, 24px) 0;
+}
+
+.auth-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: min(100%, 360px);
 }
 
 .auth-story .brand-mark span {
@@ -740,6 +778,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .sidebar-top,
+.sidebar-actions,
 .section-head,
 .account-row,
 .public-topbar,
@@ -748,6 +787,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+}
+
+.sidebar-actions {
+  gap: 8px;
 }
 
 .event-nav {
