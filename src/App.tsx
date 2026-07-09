@@ -48,8 +48,6 @@ type OwnerQuestionFilter = QuestionStatus | "all";
 
 const defaultAccent = "#0f8bff";
 const repositoryUrl = "https://github.com/aastroza/askstage";
-const contactEmail = "alonsoastroza@gmail.com";
-const twitterUrl = "https://x.com/aastroza";
 
 export default function App() {
   const [route, setRoute] = useRoute();
@@ -664,7 +662,7 @@ function EventEditor({
         ))}
       </nav>
 
-      {notice ? <Notice tone="success">{notice}</Notice> : null}
+      {notice && activeTab !== "settings" ? <Notice tone="success">{notice}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       {activeTab === "questions" ? (
@@ -904,6 +902,9 @@ function EventEditor({
               </section>
 
               <div className="settings-save-bar">
+                <span className={`save-status ${notice ? "visible" : ""}`} role="status" aria-live="polite">
+                  {notice}
+                </span>
                 <button className="primary-button" type="submit">Save changes</button>
               </div>
             </form>
@@ -1380,8 +1381,6 @@ function GoogleLogo() {
 function SocialLinks() {
   const links = [
     { href: repositoryUrl, label: "GitHub repository", icon: <GitHubIcon /> },
-    { href: `mailto:${contactEmail}`, label: "Email Alonso", icon: <MailIcon /> },
-    { href: twitterUrl, label: "Alonso on X", icon: <XIcon /> },
   ];
 
   return (
@@ -1399,23 +1398,6 @@ function GitHubIcon() {
   return (
     <svg className="github-logo" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.11.79-.25.79-.56v-2.16c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.04 1.77 2.72 1.26 3.38.96.11-.75.41-1.26.74-1.55-2.57-.29-5.27-1.28-5.27-5.72 0-1.26.45-2.3 1.2-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.18 1.19A11.08 11.08 0 0 1 12 5.91c.98 0 1.96.13 2.88.39 2.2-1.5 3.18-1.19 3.18-1.19.63 1.6.23 2.78.11 3.07.75.81 1.2 1.85 1.2 3.11 0 4.45-2.7 5.43-5.28 5.72.42.36.79 1.07.79 2.16v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5Z" />
-    </svg>
-  );
-}
-
-function MailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 6h16v12H4z" />
-      <path d="m4 7 8 6 8-6" />
-    </svg>
-  );
-}
-
-function XIcon() {
-  return (
-    <svg className="x-logo" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M18.24 2.25h3.31l-7.23 8.26 8.5 11.24h-6.66l-5.21-6.82-5.97 6.82H1.67l7.73-8.84L1.23 2.25h6.83l4.71 6.23 5.47-6.23Zm-1.16 17.52h1.83L7.07 4.13H5.1l11.98 15.64Z" />
     </svg>
   );
 }

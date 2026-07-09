@@ -832,7 +832,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
   padding: 12px 0 14px;
 }
 
@@ -857,11 +856,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .sidebar-social-links .github-logo {
-  fill: currentColor;
-  stroke: none;
-}
-
-.sidebar-social-links .x-logo {
   fill: currentColor;
   stroke: none;
 }
@@ -1189,7 +1183,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .settings-save-bar {
   display: flex;
+  align-items: center;
+  gap: 14px;
   justify-content: flex-end;
+}
+
+.save-status {
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.save-status.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* ------------------------------- Phone preview ------------------------------ */
