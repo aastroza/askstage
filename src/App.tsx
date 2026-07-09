@@ -170,7 +170,7 @@ function AuthScreen() {
             Built with <span aria-label="love" role="img">❤️</span> by{" "}
             <a href="https://iadevs.cl" target="_blank" rel="noreferrer">
               iadevs
-            </a>
+            </a>.
           </p>
         </div>
 
