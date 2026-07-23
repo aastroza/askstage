@@ -20,11 +20,11 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
-    "@supabase/supabase-js": "^2.110.1",
-    "@vitejs/plugin-react": "^6.0.2",
+    "@supabase/supabase-js": "^2.110.8",
+    "@vitejs/plugin-react": "^6.0.4",
     "qrcode": "^1.5.4",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.3",
